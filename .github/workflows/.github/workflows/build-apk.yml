@@ -1,0 +1,624 @@
+# OLI 1.3.4 — GitHub Releases setup
+
+The application checks the latest **non-prerelease** GitHub Release through the GitHub Releases API.
+
+## 1. Set the repository URL
+
+Open OLI → Settings → Updates and enter:
+
+`https://github.com/YOUR_USERNAME/YOUR_REPOSITORY`
+
+The value is saved to the normal OLI settings file under `%LOCALAPPDATA%\OLI\settings.json`.
+
+## 2. Publish releases
+
+Create GitHub Releases with semantic version tags such as:
+
+- `v1.3.4`
+- `v1.3.4`
+- `v1.4.0`
+
+The checker ignores prereleases and compares the numeric version against the application version.
+
+## 3. Updating files
+
+The checker intentionally does **not** replace OLI.exe by itself. When an update is available it opens the GitHub release page. The existing OLI GUI installer/updater remains responsible for replacing application files while preserving user data and models.
+
+## 4. Recommended release asset
+
+For each public release, upload the built release ZIP containing the GUI installer/update package. The update checker does not depend on a fixed asset filename, so the release can also contain documentation or checksums.
+
+# OLI 1.3.2 icon integration
+
+## Main application
+- Source: `OLI.Client/Assets/OLI.ico`
+- Embedded by `OLI.Client.csproj` using `ApplicationIcon`.
+- The published `dist/OLI.exe` will use the OLI main icon.
+
+## Installer
+- Source: `installer/OLI_Setup.ico`
+- Intended for the compiled `OLI_Setup.exe` resource.
+- `Install-OLI.ps1` reports the icon path for packaging.
+
+The icons are multi-resolution ICO files (16..256 px).
+
+param(
+    [switch]$Update,
+    [ValidateSet('auto','ru','en')]
+    [string]$Language = 'auto'
+)
+$ErrorActionPreference = "Stop"
+$root = $PSScriptRoot
+$scripts = Join-Path $root "scripts"
+$installerIcon = Join-Path $root "installer\OLI_Setup.ico"
+
+function Resolve-Language([string]$value) {
+    if ($value -eq 'ru') { return 'ru' }
+    if ($value -eq 'en') { return 'en' }
+    $culture = [System.Globalization.CultureInfo]::CurrentUICulture.TwoLetterISOLanguageName
+    return $(if ($culture -eq 'en') { 'en' } else { 'ru' })
+}
+$Language = Resolve-Language $Language
+
+$Strings = @{
+    ru = @{
+        Start='Запуск установки OLI...'; Icon='Иконка установщика'; DotNetMissing='Не удалось автоматически установить .NET 8 SDK.'; Winget='Устанавливаю .NET 8 SDK через winget...'; DotNetScript='Устанавливаю .NET 8 SDK через официальный скрипт...'; LlamaFail='Установка llama.cpp завершилась с ошибкой.'; BuildFail='Сборка OLI.exe завершилась с ошибкой.'; LauncherMissing='OLI-Launcher.exe не найден.'; Done='Установка OLI завершена.'
+    }
+    en = @{
+        Start='Starting OLI installation...'; Icon='Installer icon'; DotNetMissing='Could not install the .NET 8 SDK automatically.'; Winget='Installing the .NET 8 SDK via winget...'; DotNetScript='Installing the .NET 8 SDK using the official script...'; LlamaFail='llama.cpp installation failed.'; BuildFail='OLI.exe build failed.'; LauncherMissing='OLI-Launcher.exe is missing.'; Done='OLI installation complete.'
+    }
+}
+function T([string]$key) { return $Strings[$Language][$key] }
+
+function Test-DotNet8Sdk {
+    if (!(Get-Command dotnet -ErrorAction SilentlyContinue)) { return $false }
+    $sdks = & dotnet --list-sdks 2>$null
+    return ($null -ne ($sdks | Where-Object { $_ -match "^8\." }))
+}
+
+Write-Host (T 'Start')
+if (Test-Path $installerIcon) { Write-Host "$(T 'Icon'): $installerIcon" }
+
+if (-not $Update) {
+    if (!(Test-DotNet8Sdk)) {
+        $winget = Get-Command winget -ErrorAction SilentlyContinue
+        $customInstallDir = $null
+        if ($winget) {
+            Write-Host (T 'Winget')
+            winget install --id Microsoft.DotNet.SDK.8 -e --accept-package-agreements --accept-source-agreements
+        } else {
+            Write-Host (T 'DotNetScript')
+            $installerScript = Join-Path $env:TEMP "dotnet-install.ps1"
+            Invoke-WebRequest -Uri "https://dot.net/v1/dotnet-install.ps1" -OutFile $installerScript -UseBasicParsing
+            $customInstallDir = Join-Path $env:LOCALAPPDATA "Microsoft\dotnet"
+            & $installerScript -Channel 8.0 -InstallDir $customInstallDir
+        }
+        # Rebuild PATH from the registry (picks up a winget-installed SDK, which
+        # registers itself there) and, if dotnet-install.ps1 was used instead,
+        # re-add its custom install dir explicitly — a plain registry refresh
+        # here would otherwise silently drop it, since dotnet-install.ps1 with a
+        # custom -InstallDir does not register itself in the registry PATH.
+        $env:PATH = [Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" + [Environment]::GetEnvironmentVariable("PATH", "User")
+        if ($customInstallDir) { $env:PATH = "$customInstallDir;$env:PATH" }
+        if (!(Test-DotNet8Sdk)) { throw (T 'DotNetMissing') }
+    }
+
+    & (Join-Path $scripts "install-oli.ps1") -Language $Language
+    if ($LASTEXITCODE -ne 0) { throw (T 'LlamaFail') }
+}
+
+& (Join-Path $scripts "build-oli.ps1") -Language $Language
+if ($LASTEXITCODE -ne 0) { throw (T 'BuildFail') }
+
+$launcher = Join-Path $root "OLI-Launcher.exe"
+if (!(Test-Path $launcher)) { throw (T 'LauncherMissing') }
+
+$shell = New-Object -ComObject WScript.Shell
+$desktop = [Environment]::GetFolderPath("Desktop")
+$startMenu = Join-Path ([Environment]::GetFolderPath("Programs")) "OLI"
+New-Item -ItemType Directory -Force -Path $startMenu | Out-Null
+
+foreach ($dir in @($desktop, $startMenu)) {
+    $lnk = $shell.CreateShortcut((Join-Path $dir "OLI.lnk"))
+    $lnk.TargetPath = $launcher
+    $lnk.WorkingDirectory = $root
+    $exe = Join-Path $root "dist\OLI.exe"
+    if (Test-Path $exe) { $lnk.IconLocation = "$exe,0" }
+    $lnk.Description = if ($Language -eq 'en') { 'OLI - local AI assistant' } else { 'OLI — локальный ИИ-помощник' }
+    $lnk.Save()
+}
+
+Write-Host (T 'Done')
+
+# OLI language support
+
+OLI v1.3.4 supports Russian and English UI languages.
+
+## Application
+
+Open **Settings → Language** and select:
+
+- Automatic (system)
+- Русский
+- English
+
+The selected value is saved in the normal OLI settings file. `Auto` resolves from the Windows UI culture.
+
+## Installer
+
+`Install-OLI.ps1` accepts:
+
+```text
+-Language auto
+-Language ru
+-Language en
+```
+
+The default is `auto`.
+
+# OLI 1.5.1 — Mobile control
+
+The mobile PWA is a remote control surface for the OLI PC engine.
+
+## Remote settings
+After pairing, the phone can read/write:
+- generation mode
+- context size
+- CPU threads
+- GPU layers
+- temperature
+- Web Search enabled/disabled
+- search result count
+- maximum pages opened per search request
+
+Changes are written to `%LOCALAPPDATA%\OLI\settings.json` on the PC.
+Engine-related changes require the remote "Restart AI" action.
+
+## Tailscale
+Use the PC's Tailscale IPv4 address and port 8765. The mobile gateway is the
+only service intended to be reachable remotely; `llama-server` stays bound
+to `127.0.0.1:8080`.
+
+Do not expose port 8765 directly to the public Internet. Pairing is an
+application-level token, while Tailscale provides the private network path.
+
+# OLI model sources — 1.4.9 (Qwen2.5-7B default, RF-friendly)
+
+Default model: **Qwen2.5-7B-Instruct Q4_K_M GGUF** (~4.7 GB).
+
+OLI downloads a local GGUF first, validates the GGUF magic/header, then starts llama-server with `-m`.
+
+| Priority | Source | Notes |
+|---|---|---|
+| 1 | modelscope.cn | Primary for RF/CN — Hugging Face often blocked in RF. |
+| 2 | hf-mirror.com | Mirror; usually reachable even where huggingface.co isn't. |
+| 3 | huggingface.co | Official source, tried last — costs nothing to attempt since it's only reached if both of the above fail. |
+
+If a valid `.gguf` already exists in `models\`, OLI uses it and does not download another model.
+
+Large downloads use HTTP Range resume and are retried.
+
+## Manual download (recommended if auto-download fails)
+
+Save as:
+`models\qwen2.5-7b-instruct-q4_k_m.gguf` (~4.68 GB)
+
+- ModelScope: open https://modelscope.cn/models/Qwen/Qwen2.5-7B-Instruct-GGUF/files and download `qwen2.5-7b-instruct-q4_k_m.gguf` (merged, ~4.68 GB), or use the API URL:
+  `https://www.modelscope.cn/api/v1/models/Qwen/Qwen2.5-7B-Instruct-GGUF/repo?Revision=345e09e89622732311e732c2e94c063d2b9c8a10&FilePath=qwen2.5-7b-instruct-q4_k_m.gguf`
+
+A 6 GB GPU can run this with limited headroom — close other GPU apps and consider lowering `--ctx-size` (e.g. 2048) in Settings if you see OOM in `llama-server.error.log`.
+
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OLI.Core", "OLI.Core\OLI.Core.csproj", "{11111111-1111-1111-1111-111111111111}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OLI.Engine", "OLI.Engine\OLI.Engine.csproj", "{22222222-2222-2222-2222-222222222222}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OLI.Web", "OLI.Web\OLI.Web.csproj", "{33333333-3333-3333-3333-333333333333}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OLI.Memory", "OLI.Memory\OLI.Memory.csproj", "{44444444-4444-4444-4444-444444444444}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OLI.Training", "OLI.Training\OLI.Training.csproj", "{55555555-5555-5555-5555-555555555555}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OLI.Client", "OLI.Client\OLI.Client.csproj", "{66666666-6666-6666-6666-666666666666}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OLI.MobileGateway", "OLI.MobileGateway\OLI.MobileGateway.csproj", "{77777777-7777-7777-7777-777777777777}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{11111111-1111-1111-1111-111111111111}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{11111111-1111-1111-1111-111111111111}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{11111111-1111-1111-1111-111111111111}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{11111111-1111-1111-1111-111111111111}.Release|Any CPU.Build.0 = Release|Any CPU
+		{22222222-2222-2222-2222-222222222222}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{22222222-2222-2222-2222-222222222222}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{22222222-2222-2222-2222-222222222222}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{22222222-2222-2222-2222-222222222222}.Release|Any CPU.Build.0 = Release|Any CPU
+		{33333333-3333-3333-3333-333333333333}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{33333333-3333-3333-3333-333333333333}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{33333333-3333-3333-3333-333333333333}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{33333333-3333-3333-3333-333333333333}.Release|Any CPU.Build.0 = Release|Any CPU
+		{44444444-4444-4444-4444-444444444444}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{44444444-4444-4444-4444-444444444444}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{44444444-4444-4444-4444-444444444444}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{44444444-4444-4444-4444-444444444444}.Release|Any CPU.Build.0 = Release|Any CPU
+		{55555555-5555-5555-5555-555555555555}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{55555555-5555-5555-5555-555555555555}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{55555555-5555-5555-5555-555555555555}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{55555555-5555-5555-5555-555555555555}.Release|Any CPU.Build.0 = Release|Any CPU
+		{66666666-6666-6666-6666-666666666666}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{66666666-6666-6666-6666-666666666666}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{66666666-6666-6666-6666-666666666666}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{66666666-6666-6666-6666-666666666666}.Release|Any CPU.Build.0 = Release|Any CPU
+		{77777777-7777-7777-7777-777777777777}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{77777777-7777-7777-7777-777777777777}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{77777777-7777-7777-7777-777777777777}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{77777777-7777-7777-7777-777777777777}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
+
+# OLI v1.4.6
+
+Local AI assistant built around llama.cpp + GGUF.
+
+Target PC:
+- Windows 10
+- NVIDIA GTX 1660 Super 6 GB
+- Intel i7-2600K
+- 8 GB RAM
+
+Modules:
+- OLI.Client: WPF chat UI
+- OLI.Engine: C++ HTTP bridge to llama.cpp server
+- OLI.Core: shared DTO/config
+- OLI.Web: web-search provider abstraction
+- OLI.Memory: local JSON memory
+- OLI.Training: JSONL dataset manager
+
+## Architecture
+
+WPF -> OLI.Engine (localhost) -> llama.cpp server -> GGUF model
+
+Web search and memory are tools used by the client/orchestrator.
+
+## Important
+
+This is a runnable starter skeleton, not a trained model. The launcher builds `OLI.exe` automatically when it is missing, installs llama.cpp when needed, and downloads a local GGUF from multiple sources. It never requires llama.cpp `-hf` auto-download.
+The default target is Qwen2.5-7B-Instruct Q4_K_M. See MODEL_SOURCES.md for download sources and how to swap in a different model.
+
+## Build
+
+1. Install .NET 8 SDK and Visual Studio 2022 with Desktop C++.
+2. Build llama.cpp with CUDA (or use an official prebuilt CUDA release).
+3. Run `scripts/start-llama.ps1`. On first launch the model is downloaded automatically.
+4. Run `scripts/start-oli.ps1`.
+5. Run:
+   `dotnet run --project OLI.Client`
+
+If your CUDA build uses a different llama-server path, edit the script.
+
+## Web search
+
+The provider is DuckDuckGo HTML search, restricted to an allow-list of sites (Wikipedia, Ozon, DNS, Citilink, Yandex Market, Wildberries, M.Video, Habr, GitHub, Stack Overflow by default). The allow-list is enforced twice: as a `site:` filter on the query, and again by dropping any result whose host isn't on the list — so OLI can never end up citing an arbitrary site.
+
+OLI does **not** search on every message. The system prompt tells the model to answer directly when it already knows enough, and to search only when it's missing information or needs to verify something that could be outdated (price, availability, a fast-moving fact). To request a search, the model must reply with a single `OLI_SEARCH: <query>` line; the client detects that, runs the restricted search, feeds the results back, and only then shows the final answer. If it never emits that line, no network request happens at all.
+
+The gear (⚙) button in the chat header opens a settings popup with a master "allow search" toggle and a checkbox per site — changes apply to the very next message, no restart needed.
+
+## Training
+
+`OLI.Training` creates JSONL instruction examples. It does NOT fine-tune the base model by itself.
+Use the generated JSONL with a LoRA/QLoRA training pipeline on a machine with sufficient VRAM/RAM.
+
+
+## OLI 1.4.6 model download
+
+The launcher uses a dedicated, resumable model downloader. It tries multiple independent sources in sequence: HF mirror, official Hugging Face, ModelScope/QuantFactory, and QuantFactory through HF mirror/official HF. The model is stored locally as a GGUF and `llama-server` is started only with the local file; it never falls back to `-hf`.
+
+
+## Automatic runtime setup
+
+Run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\start-oli.ps1
+```
+
+The setup script:
+1. Detects NVIDIA hardware/driver.
+2. Ensures Git/CMake are available.
+3. Downloads the latest Windows x64 CUDA llama.cpp release asset when available.
+4. Installs `llama-server.exe` and its DLLs into the OLI folder.
+5. Does not require the full CUDA Toolkit when using the prebuilt CUDA runtime.
+6. Starts llama-server.
+7. On first model launch, llama.cpp downloads the configured GGUF through `-hf`.
+
+This follows the current llama.cpp Windows guidance: NVIDIA users can use a CUDA x64 release package, while source builds require the CUDA Toolkit and `GGML_CUDA=ON`. See the official documentation for details.
+
+## v1.1.4 one-click install + OLI.exe
+
+The easiest path from a clean machine to a working app:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\Install-OLI.ps1
+```
+
+`Install-OLI.ps1` does everything in one run:
+1. Checks for the .NET 8 SDK and installs it (via `winget`, or the official `dotnet-install.ps1`) if it's missing.
+2. Runs `scripts\install-oli.ps1` to fetch the CUDA build of `llama-server.exe`.
+3. Runs `scripts\build-oli.ps1`, which publishes a self-contained, single-file `dist\OLI.exe` — the target machine does not need the .NET runtime installed separately.
+4. Creates an `OLI` shortcut on the Desktop and in the Start Menu that starts `llama-server` and then launches `OLI.exe`.
+
+After that, just double-click the **OLI** shortcut.
+
+### Building only the exe
+
+If the llama.cpp engine is already installed and you only changed the app code:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build-oli.ps1
+```
+
+This produces `dist\OLI.exe`. `scripts\start-oli.ps1` (and the `OLI.bat` launcher created by `Install-OLI.ps1`) will use it automatically if present, and fall back to `dotnet run` for a dev machine where the exe hasn't been built yet.
+
+## 1.3.1_released
+- Persistent data is stored in `%LOCALAPPDATA%\\OLI`, separate from the installation directory.
+- Context limiting prevents unbounded history growth.
+- Added `🖥 Консоль` with live engine/application logs.
+- Added atomic JSON writes and corrupted-file backups.
+- Settings for context/GPU layers/threads are consumed by `start-llama.ps1`.
+- Memory records are structured and deduplicated.
+- Mobile pairing tokens now expire and request sizes are limited.
+
+
+## Updates
+
+OLI 1.3.9_released can check the latest public GitHub Release automatically at startup or manually from Settings. Configure the repository URL under Settings → Updates.
+
+## OLI 1.3.4 — English language support
+
+The 1.3.4 release adds Russian/English UI localization and automatic system-language detection. The installer supports `-Language auto|ru|en`.
+
+# OLI 1.3.8_released
+
+This release fixes the Windows PowerShell/llama.cpp installation path.
+
+## Main fixes
+
+- UTF-8 BOM on PowerShell scripts for Windows PowerShell 5.1 compatibility.
+- No concurrent `Add-Content` access to the server stdout log.
+- Official GitHub llama.cpp CUDA 12.4 x64 asset discovery.
+- Separate installer and server logs.
+- Direct launcher start of `llama-server.exe` remains enabled.
+
+## Logs
+
+`%LOCALAPPDATA%\\OLI\\logs\\install-oli.log`
+
+`%LOCALAPPDATA%\\OLI\\logs\\launcher.log`
+
+`%LOCALAPPDATA%\\OLI\\logs\\llama-server.log`
+
+`%LOCALAPPDATA%\\OLI\\logs\\llama-server.error.log`
+
+# OLI 1.4.0_released
+
+Fixes the llama.cpp installer asset discovery.
+
+## What changed
+
+- The installer no longer assumes the newest llama.cpp release contains the CUDA 12.4 Windows x64 binary.
+- It scans paginated GitHub releases and finds a release containing both `llama-bXXXX-bin-win-cuda-12.4-x64.zip` and `cudart-llama-bin-win-cuda-12.4-x64.zip`.
+- CUDA 12.4 is intentionally kept for this PC because the installed NVIDIA driver is in the CUDA 12.x compatibility range.
+- Launcher version/logs are updated to 1.4.0.
+- PowerShell scripts remain UTF-8 with BOM for Windows PowerShell 5.1.
+
+Logs: `%LOCALAPPDATA%\OLI\logs\`
+
+# OLI 1.3.1_released
+
+## Implemented
+- Fast / Performance generation modes.
+- Persistent user profile memory: name, age, interests, skills, projects.
+- Date/time injected into the system environment at request time.
+- Settings GUI: themes, mode, context/threads/GPU-layer profiles, cache reset, engine restart, diagnostics, full user-data reset.
+- Persistent settings in `data/settings.json`.
+- Mobile architecture skeleton: `OLI.MobileGateway` + `Mobile/README.md`.
+
+## Mobile security baseline
+The gateway is localhost-only by default. Do not port-forward it. Internet access will be implemented through an authenticated TLS relay in a later version.
+
+## Memory separation
+User profile/memory is kept outside model weights. This follows the OLI architecture principle: mutable memory and context must not be confused with training/fine-tuning.
+
+# OLI 1.5.0 — Mobile PWA client
+
+New: a phone client for OLI. Scoped honestly as a **Progressive Web App**
+(installable from the browser, works on iOS and Android, no app store) —
+not a native app. This is what could actually be built, reviewed, and
+delivered without a mobile toolchain or a real device to test on; a native
+app is a much larger, separate effort with per-platform code this session
+didn't attempt.
+
+## What it does
+- **Runs the model from the phone.** `OLI.MobileGateway` gained
+  `/api/ensure-running`: if llama-server isn't up, it launches
+  `OLI-Launcher.exe` on the PC — reusing all of its existing bootstrap logic
+  (installing llama.cpp, downloading the model via its multi-source
+  fallback, reading `settings.json`) instead of duplicating any of it.
+  `/api/engine-status` lets the phone poll while it boots.
+- **Works from anywhere, including behind restrictive networks, via
+  Tailscale.** The gateway now binds `0.0.0.0:8765` instead of
+  `127.0.0.1` — reachable over a Tailscale tailnet from mobile data, a
+  work Wi-Fi with outbound restrictions, wherever. This is safe because
+  Tailscale's tailnet is itself an authenticated, encrypted WireGuard
+  overlay: nothing outside it can route to the machine's Tailscale address
+  no matter what the app binds to, and device pairing (the existing token
+  system) is a second, independent layer on top. Full walkthrough in the
+  new `TAILSCALE_SETUP.md`.
+- **A real mobile UI**, not just a page — pairing screen, chat with the
+  same dark palette as the desktop app, a banner + one-tap button when the
+  engine isn't running, settings sheet, installable to the home screen
+  (`manifest.json`, service worker for the app shell).
+- **Photo OCR at any angle.** Camera capture → OCR runs **client-side** in
+  the phone's browser via Tesseract.js, so no new native dependency on the
+  PC. The photo is tried at 0°/90°/180°/270° and whichever rotation gives
+  the highest-confidence result is kept — handles the common
+  sideways/upside-down phone-photo case. Recognized text can be dropped
+  straight into the chat. Honest limitation: this does not deskew small
+  arbitrary tilt angles (e.g. a 15° lean), only 90°-increment rotation.
+
+## New files
+- `OLI.MobileGateway/wwwroot/` — the PWA itself (`index.html`, `style.css`,
+  `app.js`, `service-worker.js`, `manifest.json`, icons).
+- `scripts/build-mobile-gateway.ps1` — publishes a self-contained
+  `OLI.MobileGateway.exe` (the desktop `build-oli.ps1` only ever built the
+  WPF client, never this).
+- `scripts/start-mobile-gateway.ps1` — runs it in the background, checks
+  for an already-running instance first, prints the Windows Startup-folder
+  instructions for auto-start.
+- `TAILSCALE_SETUP.md` — end-to-end setup guide.
+
+## Not in this pass
+Listed plainly in `Mobile/README.md` rather than silently left out:
+streaming (token-by-token) responses, true offline chat, a system tray icon
+for the gateway (it's a plain background process for now), and — again —
+a native Android/iOS app.
+
+## Verification status
+None of this has been run on an actual phone, network, or Windows machine —
+this environment has no mobile device, no Tailscale, and no .NET/ASP.NET
+runtime to test against. JS syntax was checked with `node -c`, JSON/HTML
+were checked structurally, and element IDs were cross-referenced between
+`app.js` and `index.html`, but the real test is building
+`OLI.MobileGateway`, pairing a phone, and trying it for real.
+
+# OLI 1.5.1 — Mobile + Remote Settings
+
+## Mobile
+- Mobile PWA can read and change the same OLI settings used on PC.
+- Added remote engine restart after changing engine settings.
+- Pairing token is required for settings/chat/engine actions.
+- Tailscale remains the recommended transport for remote access; OLI does not expose llama-server itself.
+
+## OCR
+- Mobile OCR now tests eight orientations (45° increments) to improve recognition of rotated photos.
+- OCR remains client-side; no photo is uploaded to the PC for OCR.
+
+## Web Search
+- Increased default search results from 5 to 12.
+- Increased maximum pages per request to 6.
+- Added configurable page/context budgets.
+- Expanded the curated allow-list with developer documentation, news and technology sources.
+- Search results are de-duplicated by URL.
+
+## Desktop settings
+- Added Web Search result/page controls to Settings.
+- Existing model, memory, conversations and user data remain outside the release archive and are not deleted by updates.
+
+## Upgrade
+Replace program components from this release, but keep the existing `models` and `%LOCALAPPDATA%\OLI` data.
+
+# OLI Mobile 1.6.1
+
+- Added native Android project under `Android/OLI-Mobile`.
+- Added QR setup flow for Tailscale authorization links.
+- Added QR setup flow for OLI gateway URLs.
+- Added persistent PC/gateway address.
+- Reuses existing OLI Mobile PWA UI inside a native Android WebView.
+- Minimum Android version: Android 8.0 (API 26).
+
+Tailscale remains the official Android client/VPN. OLI Mobile cannot directly control Tailscale's Android VPN service; the app opens the scanned Tailscale authorization URL instead.
+
+# OLI Mobile 1.6.1
+
+## Chat UI
+- Assistant messages are now rendered with a mobile-friendly copy-first design.
+- Markdown fenced code blocks are shown as dedicated code cards.
+- Every code card has a **Копировать** button.
+- The whole assistant response has a **Скопировать всё** button.
+- Common command lines (`git`, `dotnet`, `python`, `curl`, PowerShell, URLs, etc.) receive a compact one-tap copy button.
+- Normal chat text remains selectable so the user can long-press and copy any part manually.
+- HTML escaping prevents model text from being interpreted as markup.
+
+## Android
+- The Android APK project continues to use the same mobile gateway UI inside WebView, so the new copy-friendly chat design is available in the native app too.
+
+## Tailscale / QR
+- Existing OLI Mobile QR pairing and Tailscale flow are preserved.
+
+# Подключение к OLI с телефона через Tailscale
+
+Позволяет открыть чат с вашим ПК с телефона из любой сети — мобильного
+интернета, кафе, работы с ограничительным Wi-Fi — без проброса портов и без
+статического публичного IP. Tailscale создаёт приватную зашифрованную сеть
+(поверх WireGuard) между вашими устройствами; порт шлюза (8765) никогда не
+торчит в открытый интернет — достучаться до него могут только устройства в
+вашем tailnet.
+
+## 1. На ПК
+
+1. Установите Tailscale: https://tailscale.com/download/windows
+2. Войдите под своим аккаунтом (Google/Microsoft/GitHub — любой).
+3. Соберите и запустите шлюз:
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\scripts\build-mobile-gateway.ps1
+   powershell -ExecutionPolicy Bypass -File .\scripts\start-mobile-gateway.ps1
+   ```
+4. Узнайте свой Tailscale-адрес:
+   ```powershell
+   tailscale ip -4
+   ```
+   Будет что-то вроде `100.101.102.103`.
+
+Чтобы шлюз поднимался автоматически при входе в Windows, добавьте ярлык на
+`scripts\start-mobile-gateway.ps1` в папку автозагрузки (в Проводнике введите
+`shell:startup` в адресную строку и положите туда ярлык).
+
+## 2. На телефоне
+
+1. Установите Tailscale (App Store / Google Play), войдите тем же аккаунтом.
+2. Установите OLI как приложение:
+   - Откройте в браузере `http://100.101.102.103:8765` (ваш адрес из шага 1.4).
+   - iOS Safari: «Поделиться» → «На экран «Домой»».
+   - Android Chrome: меню (⋮) → «Установить приложение» / «Добавить на главный экран».
+3. Откройте установленное приложение OLI, впишите тот же адрес, нажмите «Подключиться».
+4. Готово — работает из любой сети, где есть интернет у телефона, включая мобильную передачу данных.
+
+## Почему это работает даже в «белых списках» и на мобильном интернете
+
+Tailscale не открывает входящий порт на роутере — устройства сами находят
+друг друга и устанавливают исходящее шифрованное соединение (WireGuard), а
+если прямое соединение невозможно (двойной NAT, строгий фаервол оператора),
+трафик проходит через relay-серверы Tailscale (DERP) — тоже только исходящие
+соединения. Это тот же принцип, на котором работают многие корпоративные VPN,
+поэтому обычно проходит даже там, где обычный «домашний» проброс портов
+заблокирован политикой оператора или Wi-Fi-сети.
+
+## Без Tailscale (только домашняя Wi-Fi)
+
+Если телефон и ПК в одной Wi-Fi сети, Tailscale не обязателен — используйте
+локальный IP ПК (`ipconfig` → IPv4-адрес, обычно `192.168.x.x`) вместо
+Tailscale-адреса. Как только телефон покидает эту сеть (мобильный интернет,
+другая точка доступа), соединение перестанет работать — для этого и нужен
+Tailscale.
+
+## Безопаснее (опционально): HTTPS через Tailscale
+
+Tailscale умеет выпускать настоящий TLS-сертификат для вашего устройства:
+```powershell
+tailscale cert your-pc-name.your-tailnet.ts.net
+```
+Подключить готовый сертификат к Kestrel (ASP.NET) — отдельная настройка в
+`OLI.MobileGateway/Program.cs` (`UseKestrel().ConfigureHttpsDefaults(...)`);
+по умолчанию шлюз работает по HTTP, но трафик всё равно зашифрован на уровне
+самого Tailscale (WireGuard), так что это не «открытый» HTTP в привычном
+смысле — этот шаг нужен только для дополнительного слоя защиты.
+
+1.6.1
