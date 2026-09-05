@@ -1,0 +1,35 @@
+workflows:
+  oli-mobile-android:
+    name: OLI Mobile 1.6.1 Android
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+
+    environment:
+      java: 17
+
+    scripts:
+      - name: Set Android SDK location
+        script: |
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > "$CM_BUILD_DIR/Android/OLI-Mobile/local.properties"
+
+      - name: Prepare Gradle wrapper
+        script: |
+          cd "$CM_BUILD_DIR/Android/OLI-Mobile"
+          if [ ! -f gradlew ]; then
+            gradle wrapper --gradle-version 8.11.1 --distribution-type bin
+          fi
+          chmod +x gradlew
+
+      - name: Build Debug APK
+        script: |
+          cd "$CM_BUILD_DIR/Android/OLI-Mobile"
+          ./gradlew --no-daemon clean assembleDebug
+
+      - name: Build Release APK
+        script: |
+          cd "$CM_BUILD_DIR/Android/OLI-Mobile"
+          ./gradlew --no-daemon assembleRelease
+
+    artifacts:
+      - Android/OLI-Mobile/app/build/outputs/apk/debug/*.apk
+      - Android/OLI-Mobile/app/build/outputs/apk/release/*.apk
