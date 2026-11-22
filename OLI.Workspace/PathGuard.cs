@@ -1,3 +1,4 @@
+using OLI.Core;
 namespace OLI.Workspace;
 
 /// <summary>
@@ -20,7 +21,7 @@ public static class PathGuard
             return fullRoot;
         }
 
-        if (raw.Contains(InvalidChars)) throw new WorkspaceException("Путь содержит недопустимые символы.");
+        if (raw.IndexOfAny(InvalidChars) >= 0) throw new WorkspaceException("Путь содержит недопустимые символы.");
         if (raw.Contains("://", StringComparison.Ordinal)) throw new WorkspaceException("Путь не может быть URL.");
         if (raw.StartsWith("~", StringComparison.Ordinal)) throw new WorkspaceException("Путь не может начинаться с '~'.");
         if (raw.Any(char.IsControl)) throw new WorkspaceException("Путь содержит управляющие символы.");

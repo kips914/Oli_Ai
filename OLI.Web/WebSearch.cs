@@ -209,7 +209,7 @@ public sealed class WebSearch : IDisposable
     /// <summary>Absolute http(s) URL, not pointing at a private/loopback/internal address.</summary>
     public static bool TryValidateUrl(string url, out Uri uri, out string? reason)
     {
-        uri = default!;
+        uri = null!;
         reason = null;
         if (!Uri.TryCreate(url, UriKind.Absolute, out uri))
         {
