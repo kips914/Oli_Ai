@@ -608,6 +608,13 @@ public partial class MainWindow : Window
         PersistSettings();
     }
 
+    /// <summary>Any Telegram-related toggle persists immediately (no Save button there).</summary>
+    private void TelegramSetting_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_initializing) return;
+        PersistSettings();
+    }
+
     private void SearchProvider_Changed(object sender, SelectionChangedEventArgs e)
     {
         if (_initializing) return;
@@ -678,7 +685,8 @@ public partial class MainWindow : Window
             // One shared WebSearch (and its HttpClient pool) for every Telegram chat.
             var botWeb = new WebSearch(settings.SearchTimeoutSeconds, settings.SearchProvider);
             _bot = new TelegramBot(settings, () =>
-                new AgentSession(settings, _llama, botWeb, _memory, _profile, _workspace, ownsWebSearch: false),
+                new AgentSession(settings, _llama, botWeb, _memory, _profile, _workspace,
+                    ownsWebSearch: false, allowCommands: settings.Telegram.AllowCommands),
                 _workspace);
             _bot.StatusChanged += status => Dispatcher.Invoke(() => TelegramStatusText.Text = status);
 

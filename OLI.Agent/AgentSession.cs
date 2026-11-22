@@ -42,7 +42,8 @@ public sealed class AgentSession : IDisposable
         MemoryStore memory,
         UserProfileStore profile,
         WorkspaceEngine? workspace,
-        bool ownsWebSearch = true)
+        bool ownsWebSearch = true,
+        bool? allowCommands = null)
     {
         _settings = settings;
         _ownsWebSearch = ownsWebSearch;
@@ -51,7 +52,8 @@ public sealed class AgentSession : IDisposable
         _memory = memory;
         _profile = profile;
         _workspace = workspace;
-        if (workspace is not null) _tools = new ToolDispatcher(workspace);
+        if (workspace is not null)
+            _tools = new ToolDispatcher(workspace, allowCommands ?? settings.AllowCommandExecution);
         ApplySearchSettings();
     }
 
@@ -92,7 +94,7 @@ public sealed class AgentSession : IDisposable
             mode: _settings.Mode,
             openWeb: _settings.WebSearchOpenWeb,
             workspaceEnabled: _workspace is not null && _settings.WorkspaceEnabled,
-            workspaceCommands: _workspace is not null && _settings.AllowCommandExecution,
+            workspaceCommands: _workspace is not null && (_tools?.CommandsAllowed ?? false),
             telegram: _settings.Telegram.Enabled,
             extra: _settings.SystemPromptExtra,
             thinking: _settings.ThinkingEnabled);

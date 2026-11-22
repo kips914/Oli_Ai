@@ -332,7 +332,8 @@
                                        Text="OLI может отвечать в Telegram и присылать файлы из workspace. Чтобы бот работал в России при блокировках, поддерживаются три обхода: Cloudflare-релей, прокси и DNS-over-HTTPS."/>
 
                             <CheckBox x:Name="TelegramEnabledToggle" Content="Включить Telegram-бота"
-                                      Style="{StaticResource ListCheckBox}" FontWeight="SemiBold" Margin="0,0,0,14"/>
+                                      Style="{StaticResource ListCheckBox}" FontWeight="SemiBold" Margin="0,0,0,14"
+                                      Checked="TelegramSetting_Changed" Unchecked="TelegramSetting_Changed"/>
 
                             <TextBlock Text="Токен бота (от @BotFather)" Style="{StaticResource SectionTitle}"/>
                             <Grid Margin="0,0,0,14">
@@ -370,7 +371,8 @@
 
                             <CheckBox x:Name="TelegramAllowCommandsToggle"
                                       Content="Разрешить боту выполнять команды workspace"
-                                      Style="{StaticResource ListCheckBox}" Margin="0,0,0,16"/>
+                                      Style="{StaticResource ListCheckBox}" Margin="0,0,0,16"
+                                      Checked="TelegramSetting_Changed" Unchecked="TelegramSetting_Changed"/>
 
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                                 <Button x:Name="TelegramStartButton" Content="▶ Запустить бота" Click="TelegramStart_Click"

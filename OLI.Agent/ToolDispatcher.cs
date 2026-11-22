@@ -12,11 +12,19 @@ namespace OLI.Agent;
 public sealed class ToolDispatcher
 {
     private readonly WorkspaceEngine _workspace;
+    private readonly bool _allowCommands;
 
-    public ToolDispatcher(WorkspaceEngine workspace) => _workspace = workspace;
+    public ToolDispatcher(WorkspaceEngine workspace, bool allowCommands = true)
+    {
+        _workspace = workspace;
+        _allowCommands = allowCommands;
+    }
 
     /// <summary>Files produced/requested by send_file, consumed by the Telegram bot.</summary>
     public List<string> FilesToSend { get; } = [];
+
+    /// <summary>Whether run_command is available in this channel.</summary>
+    public bool CommandsAllowed => _allowCommands && _workspace.CommandsEnabled;
 
     public string DescribeCall(ToolCall call) => call.Name switch
     {
@@ -138,6 +146,8 @@ public sealed class ToolDispatcher
             }
             case "run_command":
             {
+                if (!_allowCommands)
+                    throw new WorkspaceException("Выполнение команд запрещено для этого канала (см. настройки Telegram/workspace).");
                 var command = Require(call, "command");
                 if (command.Contains(' ') || command.Contains('/') || command.Contains('\\'))
                     throw new WorkspaceException("command должен быть просто именем программы, аргументы передаются в args.");
