@@ -3,6 +3,7 @@ name: Build OLI.exe (win-x64)
 on:
   workflow_dispatch:
   push:
+    tags: ['v*']
     branches: [main, 'arena/**']
     paths-ignore:
       - '**/*.md'

@@ -118,7 +118,7 @@ public sealed class GitHubUpdateService : IDisposable
 public static class AppVersion
 {
     // Keep this synchronized with VERSION and the client assembly version.
-    public const string Current = "1.4.0";
+    public const string Current = "1.8.0";
 
     public static Version? Normalize(string? value)
     {

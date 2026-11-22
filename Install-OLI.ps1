@@ -53,7 +53,7 @@ function Test-DotNet8Sdk {
 }
 
 Write-Host '======================================'
-Write-Host ' OLI 1.4 — installer'
+Write-Host ' OLI 1.8 — installer'
 Write-Host '======================================'
 Write-Host (T 'Start')
 

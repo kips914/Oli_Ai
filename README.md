@@ -1,4 +1,4 @@
-# OLI 1.4
+# OLI 1.8
 
 **Локальный ИИ-помощник для Windows** — работает офлайн на вашем компьютере,
 умеет искать в интернете, создавать файлы и архивы, запускать код и отвечать в
@@ -42,7 +42,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-oli.ps1 -Portable
 ```
 
 Получится `dist\OLI.exe` (self-contained, .NET ставить не нужно) и
-`dist\OLI-1.4.0-win-x64-portable.zip`.
+`dist\OLI-1.8.0-win-x64-portable.zip`.
 
 ### Сборка без Windows-машины
 

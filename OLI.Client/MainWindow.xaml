@@ -81,7 +81,7 @@
                     <StackPanel VerticalAlignment="Center">
                         <TextBlock Text="OLI" FontSize="19" FontWeight="Bold"
                                    Foreground="{StaticResource TextPrimaryBrush}"/>
-                        <TextBlock x:Name="VersionText" Text="v1.4" FontSize="11"
+                        <TextBlock x:Name="VersionText" Text="v1.8" FontSize="11"
                                    Foreground="{StaticResource TextMutedBrush}"/>
                     </StackPanel>
                 </StackPanel>
