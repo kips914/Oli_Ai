@@ -70,6 +70,7 @@ public partial class MainWindow : Window
         UiLocalization.ApplyMain(this);
         ApplySettingsToUi();
         _initializing = false;
+        Nav_Checked(NavChat, new RoutedEventArgs());
         _workspaceCwd = "";
         RefreshWorkspace();
 
@@ -344,7 +345,7 @@ public partial class MainWindow : Window
 
     private void Nav_Checked(object sender, RoutedEventArgs e)
     {
-        if (!IsInitialized) return;
+        if (ChatPage is null) return;
 
         ChatPage.Visibility = NavChat.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         WorkspacePage.Visibility = NavWorkspace.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;

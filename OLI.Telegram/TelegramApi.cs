@@ -44,13 +44,15 @@ public sealed class TelegramApi : IDisposable
 
     public async Task<JsonElement> CallAsync(string method, Dictionary<string, object?>? parameters, CancellationToken ct)
     {
-        using var content = BuildContent(parameters);
         Exception? lastError = null;
 
         for (var attempt = 0; attempt < _tunnels.Count; attempt++)
         {
             var index = (_preferred + attempt) % _tunnels.Count;
             var tunnel = _tunnels[index];
+            // Fresh content per attempt: an HttpClient may consume/dispose the body
+            // of a failed request, which would break the next transport.
+            using var content = BuildContent(parameters);
             try
             {
                 using var response = await tunnel.SendAsync(method, content, _token, ct);
