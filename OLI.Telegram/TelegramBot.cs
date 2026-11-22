@@ -61,7 +61,8 @@ public sealed class TelegramBot : IAsyncDisposable
         var token = ( _settings.Telegram.BotToken ?? "").Trim();
         if (token.Length == 0) throw new InvalidOperationException("Не указан токен Telegram-бота (Telegram → BotToken).");
 
-        _api = new TelegramApi(token, _settings.Telegram.DohFallback, _settings.Telegram.RelayBaseUrl, _settings.Telegram.ProxyUrl);
+        _api = new TelegramApi(token, _settings.Telegram.DohFallback, _settings.Telegram.RelayBaseUrl,
+            _settings.Telegram.ProxyUrl, _settings.Telegram.RelaySecret);
 
         SetStatus("подключаюсь к Telegram...");
         var me = await _api.CallAsync("getMe", null, ct);
@@ -476,7 +477,7 @@ public sealed class TelegramBot : IAsyncDisposable
         try
         {
             var name = $"workspace-{DateTime.Now:yyyyMMdd-HHmm}.zip";
-            var result = await _workspace.ZipAsync("files", "archives/" + name, ct);
+            var result = await _workspace.ZipAsync("", "archives/" + name, ct);
             await SendTextAsync(chatId, result, ct);
             await SendWorkspaceFileAsync(chatId, "archives/" + name, ct);
         }
@@ -541,7 +542,8 @@ public sealed class TelegramBot : IAsyncDisposable
     /// <summary>Verifies a token + finds a working transport without starting polling.</summary>
     public static async Task<string> ProbeAsync(TelegramSettings settings, CancellationToken ct)
     {
-        using var api = new TelegramApi(settings.BotToken, settings.DohFallback, settings.RelayBaseUrl, settings.ProxyUrl);
+        using var api = new TelegramApi(settings.BotToken, settings.DohFallback, settings.RelayBaseUrl,
+            settings.ProxyUrl, settings.RelaySecret);
         var me = await api.CallAsync("getMe", null, ct);
         var username = me.TryGetProperty("username", out var u) ? u.GetString() : "?";
         return $"OK @{username} через {api.ActiveTunnel}";

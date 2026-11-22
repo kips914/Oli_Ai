@@ -353,6 +353,10 @@
                             <TextBlock Style="{StaticResource Caption}" Margin="0,0,0,12"
                                        Text="Разверните worker из папки relay/cloudflare-worker (инструкция внутри) и вставьте сюда адрес вида https://oli-bot.ВАШ.workers.dev. Cloudflare доступен из РФ, трафик до Telegram идёт уже с сервера Cloudflare."/>
 
+                            <TextBlock Text="Секрет релея (если задан RELAY_SECRET)" Style="{StaticResource SectionTitle}"/>
+                            <TextBox x:Name="TelegramRelaySecretBox" Style="{StaticResource FieldTextBox}"
+                                     Margin="0,0,0,12"/>
+
                             <TextBlock Text="Прокси / SOCKS5" Style="{StaticResource SectionTitle}"/>
                             <TextBox x:Name="TelegramProxyBox" Style="{StaticResource FieldTextBox}"
                                      Margin="0,0,0,12"/>

@@ -16,13 +16,13 @@ public sealed class TelegramApi : IDisposable
     private readonly List<IHttpTunnel> _tunnels;
     private int _preferred;
 
-    public TelegramApi(string token, bool useDoh, string? relayBaseUrl, string? proxyUrl)
+    public TelegramApi(string token, bool useDoh, string? relayBaseUrl, string? proxyUrl, string? relaySecret = null)
     {
         _token = NormalizeToken(token);
         _tunnels = [];
 
         if (!string.IsNullOrWhiteSpace(relayBaseUrl))
-            _tunnels.Add(new RelayTunnel(relayBaseUrl, DirectTunnel.Create()));
+            _tunnels.Add(new RelayTunnel(relayBaseUrl, DirectTunnel.Create(), relaySecret));
         if (!string.IsNullOrWhiteSpace(proxyUrl))
             _tunnels.Add(new ProxyTunnel(proxyUrl));
         if (useDoh)
@@ -125,8 +125,8 @@ public sealed class TelegramApi : IDisposable
                 case null: break;
                 case TelegramFile file:
                 {
-                    var stream = new FileStream(file.Path, FileMode.Open, FileAccess.Read, FileShare.Read);
-                    var part = new StreamContent(stream);
+                    var bytes = File.ReadAllBytes(file.Path);
+                    var part = new ByteArrayContent(bytes);
                     part.Headers.ContentType = new MediaTypeHeaderValue(file.ContentType);
                     form.Add(part, key, file.FileName);
                     break;

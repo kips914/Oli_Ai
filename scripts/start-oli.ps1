@@ -41,6 +41,11 @@ if (Test-EngineUp) {
             Write-Host '.' -NoNewline
         }
         Write-Host ''
+        if (-not (Test-EngineUp)) {
+            Write-Host 'Движок не поднялся за 15 минут. Лог: %LOCALAPPDATA%\OLI\logs\engine.log' -ForegroundColor Yellow
+            Write-Host 'Запустите скрипт вручную, чтобы увидеть ошибку:'
+            Write-Host "  powershell -ExecutionPolicy Bypass -File `"$root\scripts\start-llama.ps1`""
+        }
     }
 }
 

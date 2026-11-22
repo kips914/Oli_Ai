@@ -7,7 +7,7 @@ using OLI.Workspace;
 
 namespace OLI.Agent;
 
-public enum AgentEventKind { Status, Search, Page, Tool, Answer, Error, File }
+public enum AgentEventKind { Status, Search, Page, Tool, Answer, Error, File, Delta }
 
 /// <summary>A progress notification emitted while a turn is running (UI + Telegram).</summary>
 public sealed record AgentEvent(AgentEventKind Kind, string Text);
@@ -102,7 +102,7 @@ public sealed class AgentSession : IDisposable
         userTurn.Append(userText);
         lock (_historyLock) _history.Add(new ChatMessage("user", userTurn.ToString()));
 
-        var answer = await AskAsync(systemPrompt, ct);
+        var answer = await AskStreamingAsync(systemPrompt, progress, ct);
         var usedSearch = false;
 
         for (var step = 0; step < MaxSteps; step++)
@@ -128,7 +128,7 @@ public sealed class AgentSession : IDisposable
                 lock (_historyLock) _history.Add(new ChatMessage("user", result));
 
                 progress?.Report(new AgentEvent(AgentEventKind.Status, "думаю"));
-                answer = await AskAsync(systemPrompt, ct);
+                answer = await AskStreamingAsync(systemPrompt, progress, ct);
                 continue;
             }
 
@@ -142,7 +142,7 @@ public sealed class AgentSession : IDisposable
                 lock (_historyLock) _history.Add(new ChatMessage("user", block));
                 usedSearch = true;
                 progress?.Report(new AgentEvent(AgentEventKind.Status, "думаю"));
-                answer = await AskAsync(systemPrompt, ct);
+                answer = await AskStreamingAsync(systemPrompt, progress, ct);
                 continue;
             }
 
@@ -154,7 +154,7 @@ public sealed class AgentSession : IDisposable
                 var block = await BuildPagesBlockAsync(urls, progress, ct);
                 lock (_historyLock) _history.Add(new ChatMessage("user", block));
                 progress?.Report(new AgentEvent(AgentEventKind.Status, "думаю"));
-                answer = await AskAsync(systemPrompt, ct);
+                answer = await AskStreamingAsync(systemPrompt, progress, ct);
                 continue;
             }
 
@@ -194,6 +194,31 @@ public sealed class AgentSession : IDisposable
             _settings.TopK,
             _settings.RepeatPenalty,
             ct);
+    }
+
+    /// <summary>Final answer generation with token streaming (UI shows it live).</summary>
+    private async Task<string> AskStreamingAsync(string systemPrompt, IProgress<AgentEvent>? progress, CancellationToken ct)
+    {
+        IReadOnlyList<ChatMessage> messages;
+        lock (_historyLock)
+            messages = _context.Build(_history, systemPrompt, _settings.ContextSize);
+
+        if (progress is null)
+            return await AskAsync(systemPrompt, ct);
+
+        var answer = await _llama.ChatStreamAsync(
+            messages,
+            _settings.Model,
+            _settings.Temperature,
+            _settings.MaxTokens,
+            delta => progress.Report(new AgentEvent(AgentEventKind.Delta, delta)),
+            _settings.TopP,
+            _settings.TopK,
+            _settings.RepeatPenalty,
+            ct);
+
+        // Models sometimes prefix the answer with a bare /no_think marker.
+        return answer.Replace("/no_think", "", StringComparison.Ordinal).Trim();
     }
 
     private async Task<string> BuildSearchBlockAsync(string query, CancellationToken ct)

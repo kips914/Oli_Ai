@@ -16,7 +16,9 @@ public static class SettingsStore
         try
         {
             if (!File.Exists(SettingsFile)) return new OliSettings();
-            return JsonSerializer.Deserialize<OliSettings>(File.ReadAllText(SettingsFile)) ?? new OliSettings();
+            var settings = JsonSerializer.Deserialize<OliSettings>(File.ReadAllText(SettingsFile)) ?? new OliSettings();
+            Upgrade(settings);
+            return settings;
         }
         catch (Exception ex)
         {
@@ -30,6 +32,50 @@ public static class SettingsStore
     {
         AppPaths.EnsureDirectories();
         AtomicWrite(SettingsFile, JsonSerializer.Serialize(settings, JsonOptions));
+    }
+
+    /// <summary>
+    /// Brings an older settings.json up to date: fills empty collections, adds new
+    /// default sites, repairs out-of-range values. Never throws.
+    /// </summary>
+    private static void Upgrade(OliSettings settings)
+    {
+        try
+        {
+            settings.Telegram ??= new TelegramSettings();
+
+            if (settings.AllowedSites is null || settings.AllowedSites.Count == 0)
+                settings.AllowedSites = DefaultAllowedSites.Create();
+            else
+                foreach (var site in DefaultAllowedSites.Create())
+                    if (!settings.AllowedSites.Any(s => s.Domain.Equals(site.Domain, StringComparison.OrdinalIgnoreCase)))
+                        settings.AllowedSites.Add(site);
+
+            if (settings.WebSearchBlockedDomains is null || settings.WebSearchBlockedDomains.Count == 0)
+                settings.WebSearchBlockedDomains = DefaultAllowedSites.DefaultBlocked();
+
+            if (settings.AllowedCommands is null || settings.AllowedCommands.Count == 0)
+                settings.AllowedCommands = DefaultCommands.Create();
+
+            if (string.IsNullOrWhiteSpace(settings.ModelGguf))
+            {
+                settings.ModelGguf = ModelCatalog.ById(ModelCatalog.DefaultId).Gguf;
+                settings.ModelDisplayName = ModelCatalog.ById(ModelCatalog.DefaultId).DisplayName;
+            }
+
+            settings.ContextSize = Math.Clamp(settings.ContextSize, 2048, 32768);
+            settings.CpuThreads = Math.Clamp(settings.CpuThreads, 1, 32);
+            settings.GpuLayers = Math.Clamp(settings.GpuLayers, 0, 128);
+            settings.WebSearchResultLimit = Math.Clamp(settings.WebSearchResultLimit, 1, 20);
+            settings.WorkspaceQuotaBytes = Math.Clamp(settings.WorkspaceQuotaBytes, 16L * 1024 * 1024, 20L * 1024 * 1024 * 1024);
+            settings.WorkspaceMaxFileBytes = Math.Clamp(settings.WorkspaceMaxFileBytes, 1024, settings.WorkspaceQuotaBytes);
+            if (string.IsNullOrWhiteSpace(settings.GitHubRepositoryUrl) || settings.GitHubRepositoryUrl.Contains("REPLACE_ME"))
+                settings.GitHubRepositoryUrl = "https://github.com/kips914/Oli_Ai";
+        }
+        catch (Exception ex)
+        {
+            OliLog.Warning("SETTINGS", $"Не удалось обновить настройки: {ex.Message}");
+        }
     }
 
     private static void MigrateLegacyData()

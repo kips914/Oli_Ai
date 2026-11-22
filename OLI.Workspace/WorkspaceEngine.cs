@@ -130,6 +130,17 @@ public sealed class WorkspaceEngine
         return sb.ToString().TrimEnd();
     }
 
+    /// <summary>Full entry (size, flags) for one workspace path, or null if missing.</summary>
+    public WorkspaceEntry? EntryInfo(string relativePath)
+    {
+        var full = PathGuard.Resolve(Root, relativePath);
+        if (Directory.Exists(full))
+            return new WorkspaceEntry(Path.GetRelativePath(Root, full).Replace('\\', '/'), true, 0, Directory.GetLastWriteTimeUtc(full));
+        if (!File.Exists(full)) return null;
+        var info = new FileInfo(full);
+        return new WorkspaceEntry(Path.GetRelativePath(Root, full).Replace('\\', '/'), false, info.Length, info.LastWriteTimeUtc);
+    }
+
     // ---------------------------------------------------------------- files
 
     public async Task<string> WriteFileAsync(string relativePath, string content, bool append = false, CancellationToken ct = default)
@@ -242,10 +253,11 @@ public sealed class WorkspaceEngine
         await _gate.WaitAsync(ct);
         try
         {
-            var src = PathGuard.Resolve(Root, sourcePath);
+            var src = PathGuard.Resolve(Root, sourcePath, allowRoot: true);
             if (!File.Exists(src) && !Directory.Exists(src)) throw new WorkspaceException($"Не найдено: {Display(src)}");
 
             var srcName = Path.GetFileName(src.TrimEnd(Path.DirectorySeparatorChar));
+            if (srcName.Length == 0) srcName = "workspace";
             var destRel = string.IsNullOrWhiteSpace(destination)
                 ? Path.Combine(ArchiveRoot, $"{srcName}.zip")
                 : PathGuard.Resolve(Root, destination);
@@ -260,7 +272,13 @@ public sealed class WorkspaceEngine
             Directory.CreateDirectory(Path.GetDirectoryName(destRel)!);
             if (File.Exists(destRel)) File.Delete(destRel);
 
-            var toAdd = isDirectory ? BuiltFiles(src).ToList() : [];
+            var archivingRoot = isDirectory && string.Equals(
+                Path.GetFullPath(src).TrimEnd(Path.DirectorySeparatorChar),
+                Root.TrimEnd(Path.DirectorySeparatorChar),
+                StringComparison.OrdinalIgnoreCase);
+            var toAdd = isDirectory
+                ? BuiltFiles(src).Where(f => !archivingRoot || !PathGuard.IsInside(ArchiveRoot, f)).ToList()
+                : [];
             long sourceBytes = isDirectory ? toAdd.Sum(f => new FileInfo(f).Length) : new FileInfo(src).Length;
 
             // Worst case: zip is stored (no compression) — charge the raw size.

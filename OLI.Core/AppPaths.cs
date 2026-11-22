@@ -14,7 +14,8 @@ public static class AppPaths
 
     /// <summary>Root of the model's file workspace (sandbox, 1 GB by default).</summary>
     public static string WorkspaceRoot => Path.Combine(DataRoot, "workspace");
-    public static string WorkspaceFilesRoot => Path.Combine(WorkspaceRoot, "files");
+    /// <summary>The sandbox root itself — model paths are relative to it.</summary>
+    public static string WorkspaceFilesRoot => WorkspaceRoot;
     public static string WorkspaceArchiveRoot => Path.Combine(WorkspaceRoot, "archives");
     public static string WorkspaceTrashRoot => Path.Combine(WorkspaceRoot, "trash");
     public static string WorkspaceIndexFile => Path.Combine(WorkspaceRoot, "workspace.json");
@@ -24,7 +25,7 @@ public static class AppPaths
         foreach (var path in new[]
                  {
                      DataRoot, MemoryRoot, CacheRoot, ConversationsRoot, LogsRoot,
-                     WorkspaceRoot, WorkspaceFilesRoot, WorkspaceArchiveRoot, WorkspaceTrashRoot
+                     WorkspaceRoot, WorkspaceArchiveRoot, WorkspaceTrashRoot
                  })
             Directory.CreateDirectory(path);
     }

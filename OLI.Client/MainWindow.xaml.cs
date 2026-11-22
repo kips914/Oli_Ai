@@ -31,6 +31,7 @@ public partial class MainWindow : Window
     private readonly List<WorkspaceEntry> _workspaceEntries = [];
 
     private TelegramBot? _bot;
+    private ChatMessage? _streamingMessage;
     private string _workspaceCwd = "";
     private bool _busy;
     private bool _initializing = true;
@@ -114,6 +115,7 @@ public partial class MainWindow : Window
         TelegramEnabledToggle.IsChecked = _settings.Telegram.Enabled;
         TelegramTokenBox.Password = _settings.Telegram.BotToken;
         TelegramRelayBox.Text = _settings.Telegram.RelayBaseUrl;
+        TelegramRelaySecretBox.Text = _settings.Telegram.RelaySecret;
         TelegramProxyBox.Text = _settings.Telegram.ProxyUrl;
         TelegramDohToggle.IsChecked = _settings.Telegram.DohFallback;
         TelegramAllowedBox.Text = _settings.Telegram.AllowedUserIds;
@@ -163,6 +165,7 @@ public partial class MainWindow : Window
         _settings.Telegram.Enabled = TelegramEnabledToggle.IsChecked == true;
         _settings.Telegram.BotToken = TelegramTokenBox.Password.Trim();
         _settings.Telegram.RelayBaseUrl = TelegramRelayBox.Text.Trim();
+        _settings.Telegram.RelaySecret = TelegramRelaySecretBox.Text.Trim();
         _settings.Telegram.ProxyUrl = TelegramProxyBox.Text.Trim();
         _settings.Telegram.DohFallback = TelegramDohToggle.IsChecked == true;
         _settings.Telegram.AllowedUserIds = TelegramAllowedBox.Text.Trim();
@@ -195,7 +198,7 @@ public partial class MainWindow : Window
 
             foreach (var file in answer.FilesToSend)
             {
-                _display.Add(new ChatMessage("system", $"📤 Файл готов: {file}"));
+                _display.Add(new ChatMessage("system", $"📤 Файл готов: {RelativeToWorkspace(file)}"));
             }
             ScrollToEnd();
             StatusText.Text = Localization.T("status.ready");
@@ -245,10 +248,43 @@ public partial class MainWindow : Window
                 ScrollToEnd();
                 break;
             case AgentEventKind.Answer:
-                _display.Add(new ChatMessage("assistant", e.Text));
+                if (_streamingMessage is not null)
+                {
+                    ReplaceLastMessage(e.Text);
+                    _streamingMessage = null;
+                }
+                else
+                {
+                    _display.Add(new ChatMessage("assistant", e.Text));
+                }
+                ScrollToEnd();
+                break;
+            case AgentEventKind.Delta:
+                if (_streamingMessage is null)
+                {
+                    _display.Add(new ChatMessage("assistant", e.Text));
+                    _streamingMessage = _display[^1];
+                }
+                else
+                {
+                    ReplaceLastMessage(_streamingMessage.Content + e.Text);
+                }
                 ScrollToEnd();
                 break;
         }
+    }
+
+    private void ReplaceLastMessage(string content)
+    {
+        if (_display.Count == 0) _display.Add(new ChatMessage("assistant", content));
+        else _display[^1] = new ChatMessage(_display[^1].Role, content);
+        if (ChatList.Items.Count > 0) ChatList.ScrollIntoView(ChatList.Items[^1]);
+    }
+
+    private string RelativeToWorkspace(string path)
+    {
+        var full = Path.IsPathRooted(path) ? path : Path.Combine(_workspace.Root, path);
+        return Path.GetRelativePath(_workspace.Root, full).Replace('\\', '/');
     }
 
     private static string Shorten(string value, int max) =>
@@ -415,9 +451,9 @@ public partial class MainWindow : Window
         }
         try
         {
-            var relative = Path.Combine(AppPaths.WorkspaceFilesRoot, path.Replace('/', Path.DirectorySeparatorChar));
-            if (!File.Exists(relative)) { MessageBox.Show(this, "Файл не найден.", "OLI"); return; }
-            Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{relative}\"") { UseShellExecute = true });
+            var full = Path.Combine(_workspace.Root, path.Replace('/', Path.DirectorySeparatorChar));
+            if (!File.Exists(full)) { MessageBox.Show(this, "Файл не найден.", "OLI"); return; }
+            Process.Start(new ProcessStartInfo(full) { UseShellExecute = true });
         }
         catch (Exception ex)
         {
@@ -445,10 +481,11 @@ public partial class MainWindow : Window
 
     private async void WsZip_Click(object sender, RoutedEventArgs e)
     {
-        var path = SelectedWorkspacePath() ?? "files";
+        var path = SelectedWorkspacePath() ?? "";
         try
         {
-            var name = $"archives/{Path.GetFileName(path.TrimEnd('/'))}-{DateTime.Now:HHmmss}.zip";
+            var stem = path.Length == 0 ? "workspace" : Path.GetFileName(path.TrimEnd('/'));
+            var name = $"archives/{stem}-{DateTime.Now:HHmmss}.zip";
             var result = await _workspace.ZipAsync(path, name);
             OliLog.Info("WORKSPACE", result);
             MessageBox.Show(this, result, "OLI");
@@ -465,7 +502,7 @@ public partial class MainWindow : Window
         try
         {
             var name = $"archives/workspace-{DateTime.Now:yyyyMMdd-HHmmss}.zip";
-            var result = await _workspace.ZipAsync("files", name);
+            var result = await _workspace.ZipAsync("", name);
             MessageBox.Show(this, result, "OLI");
             RefreshWorkspace();
         }

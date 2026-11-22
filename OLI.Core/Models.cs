@@ -29,6 +29,8 @@ public sealed class TelegramSettings
     public string ProxyUrl { get; set; } = "";
     /// <summary>Reverse-proxy / relay base URL that speaks the Bot API, e.g. https://oli-bot.example.workers.dev</summary>
     public string RelayBaseUrl { get; set; } = "";
+    /// <summary>Shared secret for the Cloudflare Worker (RELAY_SECRET), optional.</summary>
+    public string RelaySecret { get; set; } = "";
     /// <summary>Resolve api.telegram.org through DNS-over-HTTPS and connect by IP (defeats DNS blocking).</summary>
     public bool DohFallback { get; set; } = true;
     /// <summary>Comma separated numeric Telegram user ids allowed to talk to the bot. Empty = anyone.</summary>

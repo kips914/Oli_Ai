@@ -110,4 +110,19 @@ $arguments = @(
 )
 if ($NoDownload) { $arguments += '--no-download' }
 
-& $server @arguments
+# Log everything to %LOCALAPPDATA%\OLI\logs\engine.log so a hidden start is debuggable.
+$logDir = Join-Path $env:LOCALAPPDATA 'OLI\logs'
+New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+$logFile = Join-Path $logDir 'engine.log'
+
+Write-Host "Лог движка: $logFile"
+& $server @arguments *>&1 | Tee-Object -FilePath $logFile -Append
+$exit = $LASTEXITCODE
+if ($exit -ne 0) {
+    Write-Host ''
+    Write-Host "!!! llama-server завершился с кодом $exit." -ForegroundColor Red
+    Write-Host "Смотрите $logFile"
+    Write-Host 'Частые причины: не скачалась модель (нет интернета), не хватает VRAM,'
+    Write-Host 'повреждённые DLL CUDA. Попробуйте: scripts\start-llama.ps1 -Cpu'
+    Read-Host 'Нажмите Enter, чтобы закрыть окно'
+}
