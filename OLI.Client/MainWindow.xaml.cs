@@ -164,8 +164,11 @@ public partial class MainWindow : Window
         if (!_initializing) UpdateTelegramFieldState();
     }
 
+    /// <summary>Persists settings, but leaves the port/token alone while the server is running.</summary>
     private void PersistSettings()
     {
+        var serverRunning = _serverHost?.IsRunning == true;
+
         _settings.WebSearchEnabled = WebSearchMasterToggle.IsChecked == true;
         _settings.WebSearchOpenWeb = OpenWebToggle.IsChecked == true;
         _settings.WorkspaceEnabled = WorkspaceChip.IsChecked == true;
@@ -182,10 +185,13 @@ public partial class MainWindow : Window
         _settings.Server.AllowRegistration = ServerRegistrationToggle.IsChecked == true;
         _settings.Server.WorkspaceToolsEnabled = ServerWorkspaceToggle.IsChecked == true;
         _settings.Server.UserQuotaBytes = (long)ServerQuotaSlider.Value * 1024 * 1024;
-        if (int.TryParse(ServerPortBox.Text.Trim(), out var serverPort) && serverPort is > 1024 and < 65536)
+        if (!serverRunning &&
+            int.TryParse(ServerPortBox.Text.Trim(), out var serverPort) && serverPort is > 1024 and < 65536)
             _settings.Server.Port = serverPort;
         _settings.Server.InviteCode = ServerInviteBox.Text.Trim();
         _settings.Server.AdminToken = ServerAdminTokenBox.Text.Trim();
+        // Keep the desktop app's 1 GB workspace setting in sync with the server quota default.
+        _settings.WorkspaceQuotaBytes = _settings.Server.UserQuotaBytes;
 
         _settings.Telegram.Enabled = TelegramEnabledToggle.IsChecked == true;
         _settings.Telegram.BotToken = TelegramTokenBox.Password.Trim();

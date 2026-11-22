@@ -35,6 +35,7 @@ public sealed class ServerHost : IAsyncDisposable
     private readonly UserWorkspaceRegistry _workspaces;
     private readonly ConcurrentDictionary<string, AgentSession> _sessions = new();
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _sessionLocks = new();
+    private readonly ConcurrentDictionary<string, (int Count, DateTimeOffset Until)> _throttle = new();
     private readonly LlamaClient _llama;
     private readonly WebSearch _web;
     private readonly MemoryStore _memory;
@@ -153,6 +154,7 @@ public sealed class ServerHost : IAsyncDisposable
 
         app.MapPost("/api/register", async (RegisterRequest request, HttpContext http, CancellationToken ct) =>
         {
+            if (await IsThrottledAsync(http)) return TooManyAttempts();
             if (!_options.AllowRegistration)
                 return Results.Json(new { error = "Регистрация закрыта администратором." }, statusCode: 403);
 
@@ -174,9 +176,15 @@ public sealed class ServerHost : IAsyncDisposable
 
         app.MapPost("/api/login", async (LoginRequest request, HttpContext http) =>
         {
+            if (await IsThrottledAsync(http)) return TooManyAttempts();
+
             var account = await _accounts.AuthenticateAsync(request.UserName ?? "", request.Password ?? "");
             if (account is null)
+            {
+                RegisterFailure(http);
                 return Results.Json(new { error = "Неверное имя пользователя или пароль." }, statusCode: 401);
+            }
+            ClearFailures(http);
 
             var (token, expiresAt) = await _accounts.IssueTokenAsync(account.Id, DeviceOf(http));
             return Results.Json(ToAuthResponse(account, token, expiresAt));
@@ -486,7 +494,40 @@ public sealed class ServerHost : IAsyncDisposable
         });
     }
 
-    private string SafeRelative(string path) => path.Replace('\\', '/');
+    private static string SafeRelative(string path) => path.Replace('\\', '/');
+
+    // ---------------------------------------------------------------- throttling
+
+    private static string ClientKey(HttpContext http) =>
+        http.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+    /// <summary>Six failed logins per IP in a minute → one minute of cooldown.</summary>
+    private async Task<bool> IsThrottledAsync(HttpContext http)
+    {
+        var key = ClientKey(http);
+        if (!_throttle.TryGetValue(key, out var state)) return false;
+        if (state.Until > DateTimeOffset.UtcNow) return true;
+        if (state.Until != default) _throttle.TryRemove(key, out _);
+
+        // Slow every login attempt a little: makes online guessing expensive.
+        await Task.Delay(250);
+        return false;
+    }
+
+    private void RegisterFailure(HttpContext http)
+    {
+        var key = ClientKey(http);
+        var state = _throttle.TryGetValue(key, out var current) ? current : (Count: 0, Until: default(DateTimeOffset));
+        var count = state.Count + 1;
+        _throttle[key] = count >= 6
+            ? (0, DateTimeOffset.UtcNow.AddMinutes(1))
+            : (count, default);
+    }
+
+    private void ClearFailures(HttpContext http) => _throttle.TryRemove(ClientKey(http), out _);
+
+    private static IResult TooManyAttempts() =>
+        Results.Json(new { error = "Слишком много попыток входа. Подождите минуту." }, statusCode: 429);
 
     private Account? CurrentAccount(HttpContext http)
     {
