@@ -1,2 +1,161 @@
-# Oli_Ai
-OLi_Ai is a wrapper for the Llama 3 model. The main advantage is that the wrapper adds features such as internet search and user memory. Optimization has also been improved, and the wrapper has its own installer, so installation is simple.
+# OLI 1.4
+
+**Локальный ИИ-помощник для Windows** — работает офлайн на вашем компьютере,
+умеет искать в интернете, создавать файлы и архивы, запускать код и отвечать в
+Telegram — в том числе при блокировках в РФ.
+
+```
+WPF-клиент ──► OLI.Agent ──► llama.cpp (локальная модель Qwen3.5 4B)
+                  │
+                  ├── OLI.Workspace  (файлы, zip, команды, квота 1 ГБ)
+                  ├── OLI.Web        (DuckDuckGo/Bing/Mojeek/Wikipedia + чтение страниц)
+                  └── OLI.Telegram   (бот: релей / прокси / DoH)
+```
+
+## Что нового в 1.4
+
+| # | Возможность | Где |
+|---|-------------|-----|
+| 1 | **Модель Qwen3.5 4B** (по умолчанию `Q4_K_M`), каталог из 6 GGUF-моделей, sampling Qwen (top-p/top-k/repeat), режим thinking | Настройки → Модель |
+| 2 | **Workspace на 1 ГБ** с инструментами модели: создание/чтение/правка файлов, папки, `zip`/`unzip`, `run_command` | Раздел «Workspace» |
+| 3 | **Нормальный поиск**: 4 поисковика с фолбэком, весь интернет, чтение страниц, чёрный список, защита от SSRF | Раздел «Поиск в интернете» |
+| 4 | **Telegram-бот** + обход блокировки: Cloudflare-релей, прокси/SOCKS5, DNS-over-HTTPS, автопереключение транспорта | Раздел «Telegram-бот» |
+| 5 | **Новый дизайн**: боковая навигация, дизайн-система, светлая/тёмная тема, прогресс выполнения | Всё приложение |
+| 6 | **Сборка OLI.exe** одним скриптом и через GitHub Actions | `scripts\build-oli.ps1`, CI |
+
+## Установка
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\Install-OLI.ps1
+```
+
+Скрипт поставит .NET 8 SDK (если нужно), движок llama.cpp (CUDA / Vulkan / CPU
+— выбирается автоматически), соберёт `dist\OLI.exe` и создаст ярлык «OLI».
+
+Дальше — двойной клик по ярлыку. Первый запуск скачает модель
+`Qwen3.5-4B-Q4_K_M` (~2.9 ГБ) в `models\`.
+
+### Собрать только exe
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build-oli.ps1 -Portable
+```
+
+Получится `dist\OLI.exe` (self-contained, .NET ставить не нужно) и
+`dist\OLI-1.4.0-win-x64-portable.zip`.
+
+### Сборка без Windows-машины
+
+В репозитории есть workflow `.github/workflows/build-exe.yml`: он собирает
+`OLI.exe` на `windows-latest` и кладёт готовый файл в артефакты (а на теге
+`v*` — ещё и в GitHub Release).
+
+## 1. Модель
+
+* По умолчанию — **Qwen3.5 4B, Q4_K_M** (`unsloth/Qwen3.5-4B-GGUF:Q4_K_M`):
+  ~2.9 ГБ, отлично влезает в 6 ГБ VRAM, мультиязычная.
+* Каталог (`OLI.Core/ModelCatalog.cs` + `scripts/models.json`):
+  4B IQ4_XS / Q4_K_M / Q6_K, 2B Q4_K_M, 9B Q4_K_M, Qwen3 4B (fallback).
+* Модель выбирается в настройках; движок перезапускается с новым `-hf`.
+* Sampling и thinking прокидываются в `llama-server`
+  (`--top-p`, `--top-k`, `--repeat-penalty`, `--chat-template-kwargs`).
+
+## 2. Workspace (1 ГБ)
+
+Папка `%LOCALAPPDATA%\OLI\workspace` (`files/`, `archives/`, `trash/`).
+Модель получает инструменты:
+
+```
+save_file     append_file   read_file    edit_file
+list_files    make_dir      move_path    delete_path
+zip_files     unzip_files   list_archives
+run_command   send_file
+```
+
+* **Квота** 1 ГБ (настраивается: 256 МБ … 5 ГБ); каждая запись проверяется,
+  при переполнении модель получает понятную ошибку и должна удалить лишнее.
+* **Безопасность**: все пути проходят через `PathGuard` — запрещены `..`,
+  абсолютные пути, диски, UNC, симлинки наружу; распаковка защищена от
+  zip-slip; имена устройств Windows (`CON`, `NUL`…) отклоняются.
+* **Команды**: только из белого списка (`python`, `node`, `git`, `dotnet`,
+  `tar`, `7z`…), запускаются в `files/`, с таймаутом и лимитом вывода.
+* В UI можно смотреть файлы, открывать их, удалять и упаковывать в zip.
+
+Пример запроса:
+
+> Собери в workspace папку `otchet` с тремя markdown-файлами и упакуй в
+> `archives/otchet.zip`.
+
+## 3. Поиск в интернете
+
+* Провайдеры: **DuckDuckGo**, **Bing**, **Mojeek**, **Wikipedia**
+  (+ SearXNG при указании своего инстанса). Если один заблокирован/не ответил —
+  берутся следующие; результаты мержатся и дедуплицируются.
+* Режим «**весь интернет**» (по умолчанию) или «только разрешённые сайты».
+  Чёрный список доменов + жёсткая блокировка localhost/private IP (SSRF).
+* `OLI_OPEN` реально скачивает страницу (до 8 МБ), декодирует кодировку,
+  вытаскивает title/description и читаемый текст (с приоритетом `<main>`/`<article>`).
+* Поиск запускается моделью только по необходимости — отдельным протоколом
+  `OLI_SEARCH` / `OLI_OPEN`, ограниченным 8 шагами на сообщение.
+
+## 4. Telegram-бот и обход блокировки в РФ
+
+Включите бота в разделе «Telegram-бот», вставьте токен от @BotFather.
+Бот работает на long polling и использует тот же агент, что и десктоп:
+помнит контекст per-chat, создаёт файлы, присылает их (`send_file`, `/zip`),
+принимает ваши файлы в `workspace/inbox`.
+
+### Обход фильтрации (порядок попыток)
+
+```
+relay → proxy → DoH-direct → direct
+```
+
+1. **Cloudflare-релей (рекомендуется)** — разверните `relay/cloudflare-worker`
+   (5 минут, бесплатно) и укажите адрес; трафик идёт через edge Cloudflare,
+   который из РФ доступен.
+2. **Прокси / SOCKS5** — если у вас есть свой прокси (`socks5://127.0.0.1:1080`).
+3. **DNS-over-HTTPS** — обход DNS-подмены: адрес `api.telegram.org`
+   разрешается через Cloudflare/Google/Яндекс DoH.
+4. **Прямое подключение** — если Telegram не блокируется.
+
+Первый успешный транспорт запоминается и переиспользуется; переключение видно
+в консоли и в статусе бота. Кнопка «Проверить» показывает, какой транспорт
+реально работает.
+
+## 5. Дизайн
+
+Новая дизайн-система в `OLI.Client/App.xaml`: боковая навигация, карточки,
+акцентный градиент, чипы, кастомные слайдеры/комбобоксы/чекбоксы, тёмная и
+светлая темы (с учётом системной), «живые» статусы выполнения (поиск, чтение
+страницы, работа с файлами).
+
+## Сборка из исходников
+
+```powershell
+dotnet build OLI.sln -c Release
+dotnet run --project OLI.Client -c Release
+```
+
+Требуется .NET 8 SDK. WPF-часть собирается только на Windows.
+
+## Структура
+
+```
+OLI.Client          WPF-интерфейс (чат, workspace, поиск, telegram, консоль)
+OLI.Agent           агентный цикл + протокол инструментов (общий для UI и бота)
+OLI.Workspace       песочница файлов/архивов/команд с квотой
+OLI.Web             поисковые провайдеры, чтение страниц, политика доступа
+OLI.Telegram        бот + транспортные туннели (relay/proxy/DoH/direct)
+OLI.Engine          клиент llama.cpp (sampling, стриминг)
+OLI.Core            настройки, персона, локализация, каталог моделей
+OLI.Memory          память и профиль пользователя
+OLI.MobileGateway   HTTP-шлюз для мобильного клиента
+relay/              Cloudflare Worker для обхода блокировки Telegram
+scripts/            установка движка, запуск, сборка exe
+```
+
+## Лицензия и приватность
+
+Всё работает локально: сообщения, память и файлы не покидают компьютер, кроме
+тех случаев, когда вы сами включили поиск в интернете или Telegram-бота.

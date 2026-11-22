@@ -1,0 +1,135 @@
+<Window x:Class="OLI.Client.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Настройки OLI" Width="720" Height="780" MinWidth="560" MinHeight="480"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource BgWindowBrush}" Foreground="{StaticResource TextPrimaryBrush}"
+        FontFamily="Segoe UI" UseLayoutRounding="True">
+    <Grid Margin="22">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Margin="0,0,0,14">
+            <TextBlock x:Name="SettingsTitleText" Text="Настройки OLI" FontSize="24" FontWeight="Bold"/>
+            <TextBlock x:Name="SettingsSubtitleText" FontSize="12" Foreground="{StaticResource TextMutedBrush}"
+                       Margin="0,4,0,0" Text="Модель, память, внешний вид и обслуживание"/>
+        </StackPanel>
+
+        <ScrollViewer Grid.Row="1" Style="{StaticResource ThinScrollViewer}" VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="0,0,8,0">
+
+                <!-- ===== Model ===== -->
+                <TextBlock x:Name="ModelSectionText" Text="Модель" Style="{StaticResource SectionTitle}"/>
+                <ComboBox x:Name="ModelCombo" Style="{StaticResource FieldComboBox}" Margin="0,0,0,6"
+                          SelectionChanged="ModelCombo_SelectionChanged"/>
+                <TextBlock x:Name="ModelDescriptionText" Style="{StaticResource Caption}" Margin="0,0,0,10"/>
+                <CheckBox x:Name="ThinkingToggle" Content="Режим размышлений (thinking) — медленнее, но точнее"
+                          Style="{StaticResource ListCheckBox}" Margin="0,0,0,6"/>
+                <TextBlock x:Name="ThinkingHintText" Style="{StaticResource Caption}" Margin="25,0,0,14"
+                           Text="Для Qwen3.5 включается /think в системном сообщении. На 4B-модели это заметно замедляет ответ."/>
+
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                    <Button x:Name="RestartEngineButton" Content="Перезапустить движок" Click="Restart_Click"
+                            Style="{StaticResource GhostButton}" Margin="0,0,8,0"/>
+                    <Button x:Name="DiagnosticsButton" Content="Диагностика" Click="Diagnostics_Click"
+                            Style="{StaticResource GhostButton}"/>
+                </StackPanel>
+                <Border Style="{StaticResource Divider}"/>
+
+                <!-- ===== Appearance / language / mode ===== -->
+                <TextBlock x:Name="AppearanceText" Text="Внешний вид" Style="{StaticResource SectionTitle}"/>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+                    <Button x:Name="DarkButton" Content="Тёмная" Click="Dark_Click" Style="{StaticResource GhostButton}" Margin="0,0,8,0"/>
+                    <Button x:Name="LightButton" Content="Светлая" Click="Light_Click" Style="{StaticResource GhostButton}" Margin="0,0,8,0"/>
+                    <Button x:Name="SystemButton" Content="Системная" Click="System_Click" Style="{StaticResource GhostButton}"/>
+                </StackPanel>
+
+                <TextBlock x:Name="LanguageText" Text="Язык" Style="{StaticResource SectionTitle}"/>
+                <ComboBox x:Name="LanguageCombo" Style="{StaticResource FieldComboBox}" Width="280" HorizontalAlignment="Left"
+                          DisplayMemberPath="Value" SelectedValuePath="Key" SelectedValue="Auto" Margin="0,0,0,14"
+                          SelectionChanged="LanguageCombo_SelectionChanged"/>
+
+                <TextBlock x:Name="AiModeText" Text="Режим ИИ" Style="{StaticResource SectionTitle}"/>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+                    <RadioButton x:Name="FastMode" Content="⚡ Быстрый" Margin="0,0,20,0" Checked="Mode_Checked"
+                                 Foreground="{StaticResource TextPrimaryBrush}"/>
+                    <RadioButton x:Name="PerformanceMode" Content="🧠 Производительность" Checked="Mode_Checked"
+                                 Foreground="{StaticResource TextPrimaryBrush}"/>
+                </StackPanel>
+
+                <Border Style="{StaticResource Divider}"/>
+
+                <!-- ===== Performance ===== -->
+                <TextBlock x:Name="PerformanceText" Text="Производительность" Style="{StaticResource SectionTitle}"/>
+                <TextBlock x:Name="ContextText" Text="Контекст (токены)" Foreground="{StaticResource TextMutedBrush}" FontSize="12"/>
+                <Slider x:Name="ContextSlider" Minimum="2048" Maximum="32768" TickFrequency="1024" IsSnapToTickEnabled="True"
+                        Style="{StaticResource FieldSlider}" Margin="0,2,0,0"/>
+                <TextBlock x:Name="ContextValue" Style="{StaticResource Caption}" Margin="0,0,0,10"/>
+
+                <TextBlock x:Name="ThreadsText" Text="Потоки CPU" Foreground="{StaticResource TextMutedBrush}" FontSize="12"/>
+                <Slider x:Name="ThreadsSlider" Minimum="1" Maximum="32" TickFrequency="1" IsSnapToTickEnabled="True"
+                        Style="{StaticResource FieldSlider}" Margin="0,2,0,0"/>
+                <TextBlock x:Name="ThreadsValue" Style="{StaticResource Caption}" Margin="0,0,0,10"/>
+
+                <TextBlock x:Name="GpuText" Text="GPU layers" Foreground="{StaticResource TextMutedBrush}" FontSize="12"/>
+                <Slider x:Name="GpuSlider" Minimum="0" Maximum="128" TickFrequency="1" IsSnapToTickEnabled="True"
+                        Style="{StaticResource FieldSlider}" Margin="0,2,0,0"/>
+                <TextBlock x:Name="GpuValue" Style="{StaticResource Caption}" Margin="0,0,0,10"/>
+
+                <Border Style="{StaticResource Divider}"/>
+
+                <!-- ===== Workspace ===== -->
+                <TextBlock x:Name="WorkspaceSectionText" Text="Workspace" Style="{StaticResource SectionTitle}"/>
+                <TextBlock Style="{StaticResource Caption}" Margin="0,0,0,6"
+                           Text="Лимит размера рабочей папки модели. Файлы и архивы модели тоже занимают это место."/>
+                <ComboBox x:Name="QuotaCombo" Style="{StaticResource FieldComboBox}" Width="260" HorizontalAlignment="Left"
+                          Margin="0,0,0,8"/>
+                <CheckBox x:Name="WorkspaceEnabledToggle" Content="Разрешить модели использовать workspace"
+                          Style="{StaticResource ListCheckBox}" Margin="0,0,0,6"/>
+                <CheckBox x:Name="CommandToggle" Content="Разрешить выполнение разрешённых команд (python, node, git...)"
+                          Style="{StaticResource ListCheckBox}" Margin="0,0,0,6"/>
+                <TextBox x:Name="AllowedCommandsBox" Style="{StaticResource FieldTextBox}" Margin="0,0,0,6"/>
+                <TextBlock Style="{StaticResource Caption}" Margin="0,0,0,10"
+                           Text="Список программ через запятую. Команды выполняются в папке files и не имеют доступа выше неё."/>
+
+                <Border Style="{StaticResource Divider}"/>
+
+                <!-- ===== Updates ===== -->
+                <TextBlock x:Name="UpdatesText" Text="Обновления" Style="{StaticResource SectionTitle}"/>
+                <CheckBox x:Name="CheckUpdatesStartup" Content="Проверять обновления при запуске"
+                          Style="{StaticResource ListCheckBox}" Margin="0,0,0,8"/>
+                <TextBlock x:Name="GitHubText" Text="GitHub репозиторий" Foreground="{StaticResource TextMutedBrush}" FontSize="12"/>
+                <TextBox x:Name="GitHubRepositoryBox" Style="{StaticResource FieldTextBox}" Margin="0,4,0,8"/>
+                <Button x:Name="CheckUpdatesButton" Content="Проверить обновления сейчас" Click="CheckUpdates_Click"
+                        Style="{StaticResource GhostButton}" HorizontalAlignment="Left" Margin="0,0,0,4"/>
+                <TextBlock x:Name="UpdateStatusText" Style="{StaticResource Caption}" Margin="0,4,0,10"/>
+
+                <Border Style="{StaticResource Divider}"/>
+
+                <!-- ===== Maintenance ===== -->
+                <TextBlock x:Name="MaintenanceText" Text="Обслуживание" Style="{StaticResource SectionTitle}"/>
+                <StackPanel Orientation="Horizontal">
+                    <Button x:Name="ClearCacheButton" Content="Очистить кэш" Click="ClearCache_Click"
+                            Style="{StaticResource GhostButton}" Margin="0,0,8,0"/>
+                    <Button x:Name="OpenLogsButton" Content="Открыть логи" Click="OpenLogs_Click"
+                            Style="{StaticResource GhostButton}"/>
+                </StackPanel>
+
+                <TextBlock x:Name="ResetTitleText" Text="Сброс OLI" Style="{StaticResource SectionTitle}" Margin="0,18,0,6"/>
+                <TextBlock x:Name="ResetDescriptionText" Style="{StaticResource Caption}" Margin="0,0,0,8"
+                           Text="Удаляет память, профиль пользователя, историю и кэш. Модель и workspace не удаляются."/>
+                <Button x:Name="ResetButton" Content="⚠ Сбросить данные пользователя" Click="Reset_Click"
+                        Style="{StaticResource GhostButton}" HorizontalAlignment="Left"/>
+            </StackPanel>
+        </ScrollViewer>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+            <Button x:Name="CancelButton" Content="Отмена" Click="Cancel_Click" Style="{StaticResource GhostButton}" Margin="0,0,8,0"/>
+            <Button x:Name="SaveButton" Content="Сохранить" Click="Save_Click" Style="{StaticResource AccentButton}"
+                    Height="34" MinWidth="110"/>
+        </StackPanel>
+    </Grid>
+</Window>
