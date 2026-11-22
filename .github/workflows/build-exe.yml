@@ -47,6 +47,9 @@ jobs:
           dotnet build OLI.Telegram/OLI.Telegram.csproj -c Release --no-restore
           dotnet build OLI.MobileGateway/OLI.MobileGateway.csproj -c Release --no-restore
 
+      - name: Self-test (sandbox, zip, tools, search policy)
+        run: dotnet run --project OLI.SelfTest/OLI.SelfTest.csproj -c Release
+
       - name: Publish OLI.exe
         run: >
           dotnet publish OLI.Client/OLI.Client.csproj

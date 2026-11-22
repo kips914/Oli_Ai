@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>OLI.SelfTest</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OLI.Core\OLI.Core.csproj" />
+    <ProjectReference Include="..\OLI.Workspace\OLI.Workspace.csproj" />
+    <ProjectReference Include="..\OLI.Web\OLI.Web.csproj" />
+    <ProjectReference Include="..\OLI.Agent\OLI.Agent.csproj" />
+  </ItemGroup>
+</Project>
