@@ -33,6 +33,7 @@ public sealed class AgentSession : IDisposable
     private readonly ToolDispatcher? _tools;
     private readonly List<ChatMessage> _history = [];
     private readonly object _historyLock = new();
+    private readonly bool _ownsWebSearch;
 
     public AgentSession(
         OliSettings settings,
@@ -40,9 +41,11 @@ public sealed class AgentSession : IDisposable
         WebSearch web,
         MemoryStore memory,
         UserProfileStore profile,
-        WorkspaceEngine? workspace)
+        WorkspaceEngine? workspace,
+        bool ownsWebSearch = true)
     {
         _settings = settings;
+        _ownsWebSearch = ownsWebSearch;
         _llama = llama;
         _web = web;
         _memory = memory;
@@ -275,6 +278,6 @@ public sealed class AgentSession : IDisposable
 
     public void Dispose()
     {
-        // LlamaClient/WebSearch lifetime is owned by the caller (UI/bot host).
+        if (_ownsWebSearch) _web.Dispose();
     }
 }

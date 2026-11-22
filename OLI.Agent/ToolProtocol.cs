@@ -74,20 +74,71 @@ public static partial class ToolProtocol
         RegexOptions.IgnoreCase | RegexOptions.Singleline)]
     private static partial Regex ToolCodeBlockRegex();
 
-    /// <summary>Extracts every tool call from a model reply, in order.</summary>
+    /// <summary>
+    /// Extracts every tool call from a model reply, in order. Tolerates pretty-
+    /// printed JSON: the JSON object may span several lines after the marker.
+    /// </summary>
     public static List<ToolCall> Parse(string reply)
     {
         var calls = new List<ToolCall>();
         if (string.IsNullOrWhiteSpace(reply)) return calls;
 
-        foreach (Match m in ToolCodeBlockRegex().Matches(reply))
-            if (TryBuild(m.Groups["name"].Value, m.Groups["json"].Value, calls)) { }
+        var lines = reply.Replace("\r\n", "\n").Split('\n');
 
-        if (calls.Count == 0)
-            foreach (Match m in ToolLineRegex().Matches(reply))
-                TryBuild(m.Groups["name"].Value, m.Groups["json"].Value, calls);
+        // Pass 1: markdown-fenced ```OLI_TOOL: ... ``` blocks (whole reply).
+        foreach (Match m in ToolCodeBlockRegex().Matches(reply))
+            TryBuild(m.Groups["name"].Value, m.Groups["json"].Value, calls);
+        if (calls.Count > 0) return calls;
+
+        // Pass 2: line-oriented scan with multi-line JSON accumulation.
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i].Trim();
+            if (!line.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase)) continue;
+
+            var rest = line[Prefix.Length..].Trim();
+            var space = rest.IndexOf(' ');
+            var name = space < 0 ? rest : rest[..space];
+            if (name.Length == 0) continue;
+            var jsonPart = space < 0 ? "" : rest[(space + 1)..].Trim();
+
+            if (jsonPart.Length == 0)
+            {
+                calls.Add(new ToolCall(name.ToLowerInvariant(), new(StringComparer.OrdinalIgnoreCase)));
+                continue;
+            }
+
+            // Accumulate following lines until the braces balance.
+            var buffer = jsonPart;
+            var depth = CountBraces(buffer);
+            var guard = 0;
+            while (depth > 0 && i + 1 < lines.Length && guard++ < 200)
+            {
+                buffer += "\n" + lines[++i];
+                depth += CountBraces(lines[i]);
+            }
+
+            TryBuild(name, buffer, calls);
+        }
 
         return calls;
+    }
+
+    private static int CountBraces(string value)
+    {
+        var depth = 0;
+        var inString = false;
+        var escaped = false;
+        foreach (var c in value)
+        {
+            if (escaped) { escaped = false; continue; }
+            if (c == '\\' && inString) { escaped = true; continue; }
+            if (c == '"') { inString = !inString; continue; }
+            if (inString) continue;
+            if (c is '{' or '[') depth++;
+            else if (c is '}' or ']') depth--;
+        }
+        return depth;
     }
 
     private static bool TryBuild(string name, string? json, List<ToolCall> sink)

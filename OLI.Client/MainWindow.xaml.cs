@@ -111,7 +111,7 @@ public partial class MainWindow : Window
         SearchProviderCombo.Items.Add("Bing");
         SearchProviderCombo.Items.Add("Mojeek");
         SearchProviderCombo.Items.Add("Wikipedia");
-        SearchProviderCombo.SelectedIndex = Math.Max(0, (int)_settings.SearchProvider);
+        SearchProviderCombo.SelectedIndex = ProviderToIndex(_settings.SearchProvider);
 
         TelegramEnabledToggle.IsChecked = _settings.Telegram.Enabled;
         TelegramTokenBox.Password = _settings.Telegram.BotToken;
@@ -155,7 +155,7 @@ public partial class MainWindow : Window
         _settings.WebSearchOpenWeb = OpenWebToggle.IsChecked == true;
         _settings.WorkspaceEnabled = WorkspaceChip.IsChecked == true;
         _settings.WebSearchResultLimit = (int)ResultLimitSlider.Value;
-        _settings.SearchProvider = (OliSearchProvider)Math.Clamp(SearchProviderCombo.SelectedIndex, 0, 4);
+        _settings.SearchProvider = IndexToProvider(SearchProviderCombo.SelectedIndex);
         _settings.WebSearchBlockedDomains = BlockedDomainsBox.Text
             .Split([',', ';', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries)
             .Select(x => x.Trim())
@@ -378,7 +378,35 @@ public partial class MainWindow : Window
             _workspace.Configure(_settings.WorkspaceQuotaBytes, _settings.WorkspaceMaxFileBytes,
                 _settings.AllowCommandExecution, _settings.AllowedCommands);
             RefreshWorkspace();
+            RestartEngine();
             if (window.RestartRequested) RestartApplication();
+        }
+    }
+
+    /// <summary>
+    /// Restarts llama-server in the background (used after switching the GGUF model,
+    /// so the new -hf spec actually takes effect without closing OLI).
+    /// </summary>
+    private void RestartEngine()
+    {
+        try
+        {
+            var script = Path.Combine(AppPaths.InstallRoot, "scripts", "start-llama.ps1");
+            if (!File.Exists(script))
+            {
+                OliLog.Warning("ENGINE", "start-llama.ps1 не найден рядом с OLI.exe — движок не перезапущен");
+                return;
+            }
+            Process.Start(new ProcessStartInfo("powershell.exe", $"-NoProfile -ExecutionPolicy Bypass -File \"{script}\" -Restart")
+            {
+                UseShellExecute = true,
+                WindowStyle = ProcessWindowStyle.Hidden,
+            });
+            OliLog.Info("ENGINE", "Движок перезапускается с новой моделью");
+        }
+        catch (Exception ex)
+        {
+            OliLog.Error("ENGINE", ex.Message);
         }
     }
 
@@ -565,9 +593,24 @@ public partial class MainWindow : Window
     private void SearchProvider_Changed(object sender, SelectionChangedEventArgs e)
     {
         if (_initializing) return;
-        _settings.SearchProvider = (OliSearchProvider)Math.Clamp(SearchProviderCombo.SelectedIndex, 0, 4);
+        _settings.SearchProvider = IndexToProvider(SearchProviderCombo.SelectedIndex);
         PersistSettings();
     }
+
+    private static readonly OliSearchProvider[] ProviderOrder =
+    [
+        OliSearchProvider.Auto, OliSearchProvider.DuckDuckGo, OliSearchProvider.Bing,
+        OliSearchProvider.Mojeek, OliSearchProvider.Wikipedia,
+    ];
+
+    private static int ProviderToIndex(OliSearchProvider provider)
+    {
+        var index = Array.IndexOf(ProviderOrder, provider);
+        return index < 0 ? 0 : index;
+    }
+
+    private static OliSearchProvider IndexToProvider(int index) =>
+        index >= 0 && index < ProviderOrder.Length ? ProviderOrder[index] : OliSearchProvider.Auto;
 
     private void ResultLimit_Changed(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
@@ -614,9 +657,11 @@ public partial class MainWindow : Window
             if (_workspace is null) return;
 
             var settings = _settings;
+            // One shared WebSearch (and its HttpClient pool) for every Telegram chat.
+            var botWeb = new WebSearch(settings.SearchTimeoutSeconds, settings.SearchProvider);
             _bot = new TelegramBot(settings, () =>
-                new AgentSession(settings, _llama, new WebSearch(settings.SearchTimeoutSeconds, settings.SearchProvider),
-                    _memory, _profile, _workspace), _workspace);
+                new AgentSession(settings, _llama, botWeb, _memory, _profile, _workspace, ownsWebSearch: false),
+                _workspace);
             _bot.StatusChanged += status => Dispatcher.Invoke(() => TelegramStatusText.Text = status);
 
             TelegramStatusText.Text = "Запускаю бота...";

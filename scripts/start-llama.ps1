@@ -12,7 +12,8 @@
 param(
     [string]$Model = '',
     [switch]$Cpu,
-    [switch]$NoDownload
+    [switch]$NoDownload,
+    [switch]$Restart
 )
 $ErrorActionPreference = 'Stop'
 
@@ -23,9 +24,23 @@ $dataRoot   = Join-Path $env:LOCALAPPDATA 'OLI'
 $settings   = Join-Path $dataRoot 'settings.json'
 $catalog    = Join-Path $PSScriptRoot 'models.json'
 
+# -Restart: stop a server that is already serving on port 8080 first.
+if ($Restart) {
+    $existing = Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue
+    foreach ($connection in $existing) {
+        try {
+            Write-Host "Останавливаю llama-server (PID $($connection.OwningProcess))..."
+            Stop-Process -Id $connection.OwningProcess -Force -ErrorAction Stop
+            Start-Sleep -Seconds 2
+        } catch {
+            Write-Host "Не удалось остановить PID $($connection.OwningProcess): $($_.Exception.Message)"
+        }
+    }
+}
+
 if (!(Test-Path $server)) {
     Write-Host 'llama-server.exe не найден — запускаю установку...'
-    & (Join-Path $PSScriptRoot 'install-llama.ps1')
+    & (Join-Path $PSScriptRoot 'install-oli.ps1')
 }
 if (!(Test-Path $server)) { throw 'llama-server.exe отсутствует после установки.' }
 New-Item -ItemType Directory -Force -Path $modelsDir | Out-Null
