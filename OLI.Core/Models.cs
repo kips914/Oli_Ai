@@ -41,6 +41,28 @@ public sealed class TelegramSettings
     public long MaxDocumentBytes { get; set; } = 50L * 1024 * 1024;
 }
 
+/// <summary>
+/// Settings for turning this PC into the OLI server that the Android app talks to.
+/// </summary>
+public sealed class ServerSettings
+{
+    public bool Enabled { get; set; }
+    public bool AutoStartWithApp { get; set; } = true;
+    public string Host { get; set; } = "0.0.0.0";
+    public int Port { get; set; } = 8765;
+    public bool AllowRegistration { get; set; } = true;
+    public string InviteCode { get; set; } = "";
+    /// <summary>Per-user workspace/file allowance on the server (1 GB by default).</summary>
+    public long UserQuotaBytes { get; set; } = 1024L * 1024 * 1024;
+    public string AdminToken { get; set; } = "";
+    public bool WebSearchEnabled { get; set; } = true;
+    public bool OpenWeb { get; set; } = true;
+    public bool WorkspaceToolsEnabled { get; set; } = true;
+    public string Preamble { get; set; } =
+        "Ты OLI — локальный ИИ-помощник. Пользователь общается с тобой через мобильное приложение. " +
+        "Отвечай кратко и по делу; длинные ответы структурируй списками.";
+}
+
 public sealed class OliSettings
 {
     public string LlamaBaseUrl { get; set; } = "http://127.0.0.1:8080";
@@ -89,6 +111,9 @@ public sealed class OliSettings
 
     // ---- telegram --------------------------------------------------------
     public TelegramSettings Telegram { get; set; } = new();
+
+    // ---- server (PC as backend for the Android app) -----------------------
+    public ServerSettings Server { get; set; } = new();
 
     // ---- misc ------------------------------------------------------------
     public string SystemPromptExtra { get; set; } = "";

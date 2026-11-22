@@ -36,5 +36,6 @@
     <ProjectReference Include="..\OLI.Workspace\OLI.Workspace.csproj" />
     <ProjectReference Include="..\OLI.Agent\OLI.Agent.csproj" />
     <ProjectReference Include="..\OLI.Telegram\OLI.Telegram.csproj" />
+    <ProjectReference Include="..\OLI.Server\OLI.Server.csproj" />
   </ItemGroup>
 </Project>

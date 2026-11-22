@@ -10,6 +10,7 @@ using OLI.Core;
 using Localization = OLI.Core.Localization;
 using OLI.Engine;
 using OLI.Memory;
+using OLI.Server;
 using OLI.Telegram;
 using OLI.Web;
 using OLI.Workspace;
@@ -31,6 +32,7 @@ public partial class MainWindow : Window
     private readonly List<WorkspaceEntry> _workspaceEntries = [];
 
     private TelegramBot? _bot;
+    private ServerHost? _serverHost;
     private ChatMessage? _streamingMessage;
     private string _workspaceCwd = "";
     private bool _busy;
@@ -80,11 +82,15 @@ public partial class MainWindow : Window
             _ = CheckForUpdatesOnStartupAsync();
             if (_settings.Telegram.Enabled && !string.IsNullOrWhiteSpace(_settings.Telegram.BotToken))
                 await StartBotAsync(silent: true);
+            if (_settings.Server.AutoStartWithApp && _settings.Server.Enabled)
+                await StartServerAsync(silent: true);
+            RefreshServerUi();
         };
         Closed += (_, _) =>
         {
             OliLog.EntryAdded -= OnLogEntry;
             _ = _bot?.DisposeAsync();
+            if (_serverHost is not null) _ = _serverHost.DisposeAsync();
             _llama.Dispose();
             _web.Dispose();
             _updateService.Dispose();
@@ -112,6 +118,15 @@ public partial class MainWindow : Window
         SearchProviderCombo.Items.Add("Mojeek");
         SearchProviderCombo.Items.Add("Wikipedia");
         SearchProviderCombo.SelectedIndex = ProviderToIndex(_settings.SearchProvider);
+
+        ServerAutoStartToggle.IsChecked = _settings.Server.AutoStartWithApp;
+        ServerRegistrationToggle.IsChecked = _settings.Server.AllowRegistration;
+        ServerWorkspaceToggle.IsChecked = _settings.Server.WorkspaceToolsEnabled;
+        ServerPortBox.Text = _settings.Server.Port.ToString();
+        ServerQuotaSlider.Value = Math.Clamp(_settings.Server.UserQuotaBytes / 1024 / 1024, 64, 10240);
+        ServerQuotaText.Text = TextExtractors.FormatSize(_settings.Server.UserQuotaBytes);
+        ServerInviteBox.Text = _settings.Server.InviteCode;
+        ServerAdminTokenBox.Text = _settings.Server.AdminToken;
 
         TelegramEnabledToggle.IsChecked = _settings.Telegram.Enabled;
         TelegramTokenBox.Password = _settings.Telegram.BotToken;
@@ -162,6 +177,15 @@ public partial class MainWindow : Window
             .Where(x => x.Length > 0)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+        _settings.Server.AutoStartWithApp = ServerAutoStartToggle.IsChecked == true;
+        _settings.Server.AllowRegistration = ServerRegistrationToggle.IsChecked == true;
+        _settings.Server.WorkspaceToolsEnabled = ServerWorkspaceToggle.IsChecked == true;
+        _settings.Server.UserQuotaBytes = (long)ServerQuotaSlider.Value * 1024 * 1024;
+        if (int.TryParse(ServerPortBox.Text.Trim(), out var serverPort) && serverPort is > 1024 and < 65536)
+            _settings.Server.Port = serverPort;
+        _settings.Server.InviteCode = ServerInviteBox.Text.Trim();
+        _settings.Server.AdminToken = ServerAdminTokenBox.Text.Trim();
 
         _settings.Telegram.Enabled = TelegramEnabledToggle.IsChecked == true;
         _settings.Telegram.BotToken = TelegramTokenBox.Password.Trim();
@@ -366,13 +390,15 @@ public partial class MainWindow : Window
         WebPage.Visibility = NavWeb.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         TelegramPage.Visibility = NavTelegram.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         ConsolePage.Visibility = NavConsole.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        AdminPage.Visibility = NavAdmin.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         ComposerBorder.Visibility = NavChat.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
 
         if (NavChat.IsChecked == true) { PageTitle.Text = "Чат с OLI"; PageSubtitle.Text = Localization.T("app.tagline"); }
         else if (NavWorkspace.IsChecked == true) { PageTitle.Text = "Workspace"; PageSubtitle.Text = "Файлы, архивы и команды — всё внутри лимита 1 ГБ"; RefreshWorkspace(); }
         else if (NavWeb.IsChecked == true) { PageTitle.Text = "Поиск в интернете"; PageSubtitle.Text = "Провайдеры, область поиска и чёрный список"; }
         else if (NavTelegram.IsChecked == true) { PageTitle.Text = "Telegram-бот"; PageSubtitle.Text = "Обход блокировок: релей, прокси, DoH"; }
-        else { PageTitle.Text = "Консоль"; PageSubtitle.Text = "Живые логи OLI"; }
+        else if (NavConsole.IsChecked == true) { PageTitle.Text = "Консоль"; PageSubtitle.Text = "Живые логи OLI"; }
+        else { PageTitle.Text = "Пульт администратора"; PageSubtitle.Text = "Сервер для телефона и пользователи"; RefreshServerUi(); }
     }
 
     private void OpenFullSettings_Click(object sender, RoutedEventArgs e)
@@ -708,6 +734,91 @@ public partial class MainWindow : Window
         await _bot.DisposeAsync();
         _bot = null;
         TelegramStatusText.Text = "Бот остановлен.";
+    }
+
+    // ================================================================ server
+
+    private void ServerSetting_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_initializing) return;
+        PersistSettings();
+        RefreshServerUi();
+    }
+
+    private void ServerStart_Click(object sender, RoutedEventArgs e) => _ = StartServerAsync(silent: false);
+    private void ServerStop_Click(object sender, RoutedEventArgs e) => _ = StopServerAsync();
+
+    private async Task StartServerAsync(bool silent)
+    {
+        try
+        {
+            PersistSettings();
+            _settings.Server.Enabled = true;
+            _serverHost ??= CreateServerHost();
+            await _serverHost.StartAsync();
+            RefreshServerUi();
+        }
+        catch (Exception ex)
+        {
+            OliLog.Error("SERVER", ex.ToString());
+            ServerStatusLine.Text = "⚠ " + ex.Message;
+            if (!silent) MessageBox.Show(this, ex.Message, "Сервер OLI", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private async Task StopServerAsync()
+    {
+        if (_serverHost is null) return;
+        await _serverHost.StopAsync();
+        RefreshServerUi();
+    }
+
+    private ServerHost CreateServerHost() => new(new ServerOptions
+    {
+        DataRoot = Path.Combine(AppPaths.DataRoot, "server"),
+        Host = _settings.Server.Host,
+        Port = _settings.Server.Port,
+        LlamaBaseUrl = _settings.LlamaBaseUrl,
+        Model = _settings.Model,
+        MaxTokens = _settings.MaxTokens,
+        Temperature = _settings.Temperature,
+        TopP = _settings.TopP,
+        TopK = _settings.TopK,
+        RepeatPenalty = _settings.RepeatPenalty,
+        AllowRegistration = _settings.Server.AllowRegistration,
+        InviteCode = _settings.Server.InviteCode,
+        UserQuotaBytes = _settings.Server.UserQuotaBytes,
+        AdminToken = _settings.Server.AdminToken,
+        WebSearchEnabled = _settings.WebSearchEnabled,
+        OpenWeb = _settings.WebSearchOpenWeb,
+        WorkspaceToolsEnabled = _settings.Server.WorkspaceToolsEnabled,
+        Preamble = _settings.Server.Preamble,
+    });
+
+    private void RefreshServerUi()
+    {
+        if (ServerStatusLine is null) return;
+        var running = _serverHost?.IsRunning == true;
+        ServerStatusLine.Text = running
+            ? $"🟢 Сервер работает на порту {_settings.Server.Port} · пользователей: {_serverHost!.RegisteredUsers}"
+            : "◻ Сервер остановлен — телефон не сможет подключиться.";
+        ServerStartButton.IsEnabled = !running;
+        ServerStopButton.IsEnabled = running;
+
+        var address = NetworkInfo.PreferredAddress();
+        ServerAddressLine.Text = running && address is not null
+            ? $"В приложении на телефоне укажите сервер: http://{address}:{_settings.Server.Port}"
+            : "Адрес для телефона появится после запуска (нужен Wi-Fi в той же сети или VPN).";
+        ServerQuotaText.Text = TextExtractors.FormatSize((long)ServerQuotaSlider.Value * 1024 * 1024);
+    }
+
+    private void OpenAdmin_Click(object sender, RoutedEventArgs e)
+    {
+        PersistSettings();
+        _serverHost ??= CreateServerHost();
+        var window = new AdminWindow(_serverHost) { Owner = this };
+        window.ShowDialog();
+        RefreshServerUi();
     }
 
     // ================================================================ console

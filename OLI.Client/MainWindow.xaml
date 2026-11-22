@@ -119,6 +119,8 @@
                                      Checked="Nav_Checked" Style="{StaticResource NavRadio}"/>
                         <RadioButton x:Name="NavConsole" Content="🖥  Консоль" GroupName="nav"
                                      Checked="Nav_Checked" Style="{StaticResource NavRadio}"/>
+                        <RadioButton x:Name="NavAdmin" Content="🛰  Пульт админа" GroupName="nav"
+                                     Checked="Nav_Checked" Style="{StaticResource NavRadio}"/>
                     </StackPanel>
                 </StackPanel>
 
@@ -381,6 +383,65 @@
                                         Style="{StaticResource GhostButton}"/>
                             </StackPanel>
                             <TextBlock x:Name="TelegramStatusText" Style="{StaticResource Caption}"/>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Border>
+
+                <!-- SERVER / ADMIN -->
+                <Border x:Name="AdminPage" Style="{StaticResource Card}" Padding="20" Visibility="Collapsed">
+                    <ScrollViewer Style="{StaticResource ThinScrollViewer}" VerticalScrollBarVisibility="Auto">
+                        <StackPanel MaxWidth="720" HorizontalAlignment="Left">
+                            <TextBlock Text="Сервер для телефона" Style="{StaticResource H1}"/>
+                            <TextBlock Style="{StaticResource Caption}" Margin="0,6,0,18"
+                                       Text="Этот ПК — сервер OLI. Телефонное приложение регистрируется, входит по логину и паролю и получает личный workspace на 1 ГБ. Пароли хранятся только в виде хеша PBKDF2."/>
+
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                                <Button x:Name="AdminPanelButton" Content="🛰 Открыть пульт администратора"
+                                        Click="OpenAdmin_Click" Style="{StaticResource AccentButton}" Height="36"
+                                        Margin="0,0,8,0"/>
+                                <Button x:Name="ServerStartButton" Content="▶ Запустить сервер" Click="ServerStart_Click"
+                                        Style="{StaticResource GhostButton}" Margin="0,0,8,0"/>
+                                <Button x:Name="ServerStopButton" Content="■ Остановить" Click="ServerStop_Click"
+                                        Style="{StaticResource GhostButton}"/>
+                            </StackPanel>
+                            <TextBlock x:Name="ServerStatusLine" Style="{StaticResource Caption}" Margin="0,0,0,16"/>
+                            <TextBlock x:Name="ServerAddressLine" Style="{StaticResource Caption}" Margin="0,0,0,16"
+                                       FontFamily="Cascadia Mono, Consolas"/>
+
+                            <Border Style="{StaticResource Divider}"/>
+
+                            <CheckBox x:Name="ServerAutoStartToggle" Content="Запускать сервер вместе с OLI"
+                                      Style="{StaticResource ListCheckBox}" Margin="0,0,0,8"
+                                      Checked="ServerSetting_Changed" Unchecked="ServerSetting_Changed"/>
+                            <CheckBox x:Name="ServerRegistrationToggle" Content="Разрешить регистрацию новых пользователей"
+                                      Style="{StaticResource ListCheckBox}" Margin="0,0,0,8"
+                                      Checked="ServerSetting_Changed" Unchecked="ServerSetting_Changed"/>
+                            <CheckBox x:Name="ServerWorkspaceToggle" Content="Разрешить модели работать с файлами пользователя"
+                                      Style="{StaticResource ListCheckBox}" Margin="0,0,0,14"
+                                      Checked="ServerSetting_Changed" Unchecked="ServerSetting_Changed"/>
+
+                            <TextBlock Text="Порт сервера" Style="{StaticResource SectionTitle}"/>
+                            <TextBox x:Name="ServerPortBox" Style="{StaticResource FieldTextBox}" Width="140"
+                                     HorizontalAlignment="Left" Margin="0,0,0,12"/>
+
+                            <TextBlock Text="Квота на пользователя" Style="{StaticResource SectionTitle}"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                                <Slider x:Name="ServerQuotaSlider" Width="260" Minimum="64" Maximum="10240"
+                                        TickFrequency="64" IsSnapToTickEnabled="True"
+                                        Style="{StaticResource FieldSlider}"/>
+                                <TextBlock x:Name="ServerQuotaText" Margin="12,0,0,0" VerticalAlignment="Center"
+                                           Foreground="{StaticResource TextMutedBrush}" FontSize="12"/>
+                            </StackPanel>
+
+                            <TextBlock Text="Код приглашения (пусто — не требуется)" Style="{StaticResource SectionTitle}"/>
+                            <TextBox x:Name="ServerInviteBox" Style="{StaticResource FieldTextBox}"
+                                     Margin="0,0,0,12"/>
+
+                            <TextBlock Text="Токен администратора (для удалённого пульта)" Style="{StaticResource SectionTitle}"/>
+                            <TextBox x:Name="ServerAdminTokenBox" Style="{StaticResource FieldTextBox}"
+                                     Margin="0,0,0,6"/>
+                            <TextBlock Style="{StaticResource Caption}"
+                                       Text="Если токен задан, /api/admin принимает его в заголовке X-OLI-Admin. Локально пульт работает и без токена (loopback)."/>
                         </StackPanel>
                     </ScrollViewer>
                 </Border>

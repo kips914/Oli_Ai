@@ -46,6 +46,7 @@ jobs:
           dotnet build OLI.Agent/OLI.Agent.csproj     -c Release --no-restore
           dotnet build OLI.Telegram/OLI.Telegram.csproj -c Release --no-restore
           dotnet build OLI.MobileGateway/OLI.MobileGateway.csproj -c Release --no-restore
+          dotnet build OLI.Server/OLI.Server.csproj -c Release --no-restore
 
       - name: Self-test (sandbox, zip, tools, search policy)
         run: dotnet run --project OLI.SelfTest/OLI.SelfTest.csproj -c Release
@@ -59,6 +60,16 @@ jobs:
           -p:EnableCompressionInSingleFile=true
           -p:DebugType=none -p:DebugSymbols=false
           -o dist
+
+      - name: Publish OLI.Server.exe
+        run: >
+          dotnet publish OLI.Server/OLI.Server.csproj
+          -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          -p:DebugType=none -p:DebugSymbols=false
+          -o dist/server
 
       - name: Verify executable
         shell: pwsh
@@ -76,7 +87,8 @@ jobs:
           Copy-Item scripts/* dist/scripts/ -Recurse -Force
           New-Item -ItemType Directory -Force dist/relay | Out-Null
           Copy-Item relay/* dist/relay/ -Recurse -Force -ErrorAction SilentlyContinue
-          Compress-Archive -Path 'dist/OLI.exe','dist/OLI.ico','dist/Install-OLI.ps1','dist/scripts','dist/relay','dist/README.md' `
+          Copy-Item dist/server/OLI.Server.exe dist/OLI.Server.exe -Force
+          Compress-Archive -Path 'dist/OLI.exe','dist/OLI.Server.exe','dist/OLI.ico','dist/Install-OLI.ps1','dist/scripts','dist/relay','dist/README.md' `
             -DestinationPath 'dist/OLI-win-x64.zip' -Force
 
       - name: Upload artifacts
@@ -85,6 +97,7 @@ jobs:
           name: OLI-win-x64
           path: |
             dist/OLI.exe
+            dist/OLI.Server.exe
             dist/OLI-win-x64.zip
           retention-days: 30
 
@@ -98,4 +111,4 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             gh release create ${{ github.ref_name }} --title "OLI ${{ github.ref_name }}" --notes "Automated build ${{ github.ref_name }}"
           }
-          gh release upload ${{ github.ref_name }} dist/OLI.exe dist/OLI-win-x64.zip --clobber
+          gh release upload ${{ github.ref_name }} dist/OLI.exe dist/OLI.Server.exe dist/OLI-win-x64.zip --clobber
