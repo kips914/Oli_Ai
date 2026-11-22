@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using OLI.Core;
+using Localization = OLI.Core.Localization;
 
 namespace OLI.Client;
 

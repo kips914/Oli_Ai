@@ -6,6 +6,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using OLI.Agent;
 using OLI.Core;
+using Localization = OLI.Core.Localization;
 using OLI.Engine;
 using OLI.Memory;
 using OLI.Telegram;
