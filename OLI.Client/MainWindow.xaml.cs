@@ -754,6 +754,24 @@ public partial class MainWindow : Window
     }
 
     private void ServerStart_Click(object sender, RoutedEventArgs e) => _ = StartServerAsync(silent: false);
+
+    private void ServerFirewall_Click(object sender, RoutedEventArgs e)
+    {
+        var port = _settings.Server.Port;
+        var error = FirewallHelper.EnsurePortOpen(port);
+        if (error is null)
+        {
+            ServerAddressLine.Text = $"Порт {port} разрешён в брандмауэре. " +
+                (NetworkInfo.PreferredAddress() is { } address
+                    ? $"Телефону указывать: http://{address}:{port}"
+                    : "Адрес появится после запуска сервера.");
+            return;
+        }
+
+        MessageBox.Show(this,
+            $"Не удалось открыть порт {port}: {error}.\n\n" + FirewallHelper.Hint(port),
+            "Брандмауэр Windows", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
     private void ServerStop_Click(object sender, RoutedEventArgs e) => _ = StopServerAsync();
 
     private async Task StartServerAsync(bool silent)
@@ -817,7 +835,8 @@ public partial class MainWindow : Window
 
         var address = NetworkInfo.PreferredAddress();
         ServerAddressLine.Text = running && address is not null
-            ? $"В приложении на телефоне укажите сервер: http://{address}:{_settings.Server.Port}"
+            ? $"В приложении на телефоне укажите сервер: http://{address}:{_settings.Server.Port}" +
+              (FirewallHelper.RuleExists(_settings.Server.Port) ? "" : "  · нажмите «Открыть порт», если телефон не подключается")
             : "Адрес для телефона появится после запуска (нужен Wi-Fi в той же сети или VPN).";
         ServerQuotaText.Text = TextExtractors.FormatSize((long)ServerQuotaSlider.Value * 1024 * 1024);
     }

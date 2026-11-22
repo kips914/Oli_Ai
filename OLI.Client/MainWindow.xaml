@@ -402,6 +402,8 @@
                                 <Button x:Name="ServerStartButton" Content="▶ Запустить сервер" Click="ServerStart_Click"
                                         Style="{StaticResource GhostButton}" Margin="0,0,8,0"/>
                                 <Button x:Name="ServerStopButton" Content="■ Остановить" Click="ServerStop_Click"
+                                        Style="{StaticResource GhostButton}" Margin="0,0,8,0"/>
+                                <Button x:Name="ServerFirewallButton" Content="🛡 Открыть порт" Click="ServerFirewall_Click"
                                         Style="{StaticResource GhostButton}"/>
                             </StackPanel>
                             <TextBlock x:Name="ServerStatusLine" Style="{StaticResource Caption}" Margin="0,0,0,16"/>
