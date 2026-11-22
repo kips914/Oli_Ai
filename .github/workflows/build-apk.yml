@@ -19,7 +19,7 @@ on:
   workflow_dispatch:
     inputs:
       default_server:
-        description: 'Адрес сервера по умолчанию (например 192.168.1.10:8765), можно оставить пустым'
+        description: 'Адрес сервера OLI по умолчанию (например https://oli.example.com), пусто = из настроек репозитория'
         required: false
         default: ''
 
@@ -66,7 +66,9 @@ jobs:
 
       - name: Build debug + release APK
         env:
-          OLI_DEFAULT_SERVER: ${{ github.event.inputs.default_server }}
+          # Empty → the Gradle default in app/build.gradle.kts is used.
+          OLI_DEFAULT_SERVER: ${{ github.event.inputs.default_server || vars.OLI_DEFAULT_SERVER }}
+          OLI_DIRECTORY_URL: ${{ vars.OLI_DIRECTORY_URL }}
         run: bash Android/ci/gradle-build.sh
 
       - name: Collect artifacts

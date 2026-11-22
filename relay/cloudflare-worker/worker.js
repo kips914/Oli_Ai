@@ -20,9 +20,31 @@
 
 const TELEGRAM = 'https://api.telegram.org';
 
+/**
+ * Optional OLI app endpoint: answers where the OLI server currently lives, so the
+ * Android app can find it without hard-coding an address.
+ *   GET /api/oli/server -> {"server":"https://oli.example.com:8765","updated":"..."}
+ * Set the SERVER_URL variable in wrangler.toml ([vars] SERVER_URL = "...").
+ */
+function oliServerResponse(env) {
+  const server = (env && env.SERVER_URL) || '';
+  return new Response(JSON.stringify({ server, updated: new Date().toISOString() }), {
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      'access-control-allow-origin': '*',
+      'cache-control': 'no-store',
+    },
+  });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+
+    // OLI app: where is the server right now? (set SERVER_URL in wrangler.toml)
+    if (url.pathname === '/api/oli/server') {
+      return oliServerResponse(env);
+    }
 
     // Health probe for OLI's "Проверить" button.
     if (url.pathname === '/' || url.pathname === '/health') {

@@ -2,9 +2,9 @@ package com.oli.mobile
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
@@ -31,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import com.oli.mobile.data.OliRepository
+import com.oli.mobile.data.UserProfile
 import com.oli.mobile.ui.AuthScreen
 import com.oli.mobile.ui.ChatScreen
 import com.oli.mobile.ui.FilesScreen
@@ -65,6 +67,7 @@ private fun OliApp() {
     val messages by repo.messages.collectAsState()
     val busy by repo.busy.collectAsState()
     val usage by repo.usage.collectAsState()
+    val offline by repo.defaultServerOffline.collectAsState()
     var tab by remember { mutableStateOf(Tab.Chat) }
     var filesPath by remember { mutableStateOf("") }
 
@@ -84,46 +87,63 @@ private fun OliApp() {
             CircularProgressIndicator()
         }
 
-        is OliRepository.Session.SignedOut -> AuthScreen(repo)
+        is OliRepository.Session.SignedOut -> AuthScreen(
+            repo = repo,
+            defaultServerOffline = offline,
+            onDemo = { repo.enterDemo(); tab = Tab.Chat }
+        )
 
-        is OliRepository.Session.SignedIn -> Scaffold(
-            bottomBar = {
-                NavigationBar {
-                    Tab.entries.forEach { entry ->
-                        NavigationBarItem(
-                            selected = tab == entry,
-                            onClick = { tab = entry },
-                            icon = { Icon(entry.icon, contentDescription = entry.label) },
-                            label = { Text(entry.label) }
-                        )
+        else -> {
+            val demo = state is OliRepository.Session.Demo
+            val user = when (state) {
+                is OliRepository.Session.SignedIn -> state.user
+                else -> UserProfile("demo", "гость", "Гость", 1024L * 1024 * 1024, false)
+            }
+
+            Scaffold(
+                bottomBar = {
+                    NavigationBar {
+                        Tab.entries.forEach { entry ->
+                            NavigationBarItem(
+                                selected = tab == entry,
+                                onClick = { tab = entry },
+                                icon = { Icon(entry.icon, contentDescription = entry.label) },
+                                label = { Text(entry.label) }
+                            )
+                        }
                     }
                 }
-            }
-        ) { padding ->
-            Box(Modifier.fillMaxSize().padding(padding)) {
-                when (tab) {
-                    Tab.Chat -> ChatScreen(
-                        repo = repo,
-                        messages = messages,
-                        busy = busy,
-                        displayName = state.user.displayName,
-                        onOpenFiles = { filesPath = ""; tab = Tab.Files }
-                    )
+            ) { padding ->
+                Box(Modifier.fillMaxSize().padding(padding)) {
+                    when (tab) {
+                        Tab.Chat -> ChatScreen(
+                            repo = repo,
+                            messages = messages,
+                            busy = busy,
+                            displayName = if (demo) "гость" else user.displayName,
+                            demo = demo,
+                            onOpenFiles = { filesPath = ""; tab = Tab.Files },
+                            onExitDemo = { repo.exitDemo() }
+                        )
 
-                    Tab.Files -> FilesScreen(
-                        repo = repo,
-                        usage = usage,
-                        path = filesPath,
-                        onPathChange = { filesPath = it },
-                        onBack = { tab = Tab.Chat }
-                    )
+                        Tab.Files -> FilesScreen(
+                            repo = repo,
+                            usage = if (demo) null else usage,
+                            demo = demo,
+                            path = filesPath,
+                            onPathChange = { filesPath = it },
+                            onBack = { tab = Tab.Chat }
+                        )
 
-                    Tab.Settings -> SettingsScreen(
-                        repo = repo,
-                        user = state.user,
-                        usagePercent = usage?.percent ?: 0.0,
-                        onSignedOut = { tab = Tab.Chat }
-                    )
+                        Tab.Settings -> SettingsScreen(
+                            repo = repo,
+                            user = user,
+                            usagePercent = usage?.percent ?: 0.0,
+                            demo = demo,
+                            onSignedOut = { tab = Tab.Chat },
+                            onExitDemo = { repo.exitDemo(); tab = Tab.Chat }
+                        )
+                    }
                 }
             }
         }

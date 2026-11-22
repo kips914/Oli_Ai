@@ -62,6 +62,7 @@ import java.io.File
 fun FilesScreen(
     repo: OliRepository,
     usage: Usage?,
+    demo: Boolean,
     path: String,
     onPathChange: (String) -> Unit,
     onBack: () -> Unit
@@ -133,15 +134,32 @@ fun FilesScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            IconButton(onClick = {
-                scope.launch {
-                    val name = "folder-" + System.currentTimeMillis().toString().takeLast(6)
-                    repo.makeDir(if (path.isEmpty()) name else "$path/$name")
-                    reload()
+            IconButton(
+                enabled = !demo,
+                onClick = {
+                    scope.launch {
+                        val name = "folder-" + System.currentTimeMillis().toString().takeLast(6)
+                        repo.makeDir(if (path.isEmpty()) name else "$path/$name")
+                        reload()
+                    }
                 }
-            }) { Icon(Icons.Filled.Folder, contentDescription = "Создать папку") }
-            IconButton(onClick = { pickDocument.launch(arrayOf("*/*")) }) {
+            ) { Icon(Icons.Filled.Folder, contentDescription = "Создать папку") }
+            IconButton(enabled = !demo, onClick = { pickDocument.launch(arrayOf("*/*")) }) {
                 Icon(Icons.Filled.Upload, contentDescription = "Загрузить файл")
+            }
+        }
+
+        if (demo) {
+            Surface(
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)
+            ) {
+                Text(
+                    "👁 Режим просмотра: здесь только примеры файлов, загрузка и удаление недоступны.",
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.padding(10.dp)
+                )
             }
         }
 
@@ -155,7 +173,8 @@ fun FilesScreen(
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("Ваше место", style = MaterialTheme.typography.labelMedium)
                     Text(
-                        "${OliApi.prettySize(usage?.used ?: 0)} из ${OliApi.prettySize(usage?.quota ?: 0)}",
+                        if (demo) "1 ГБ в аккаунте"
+                        else "${OliApi.prettySize(usage?.used ?: 0)} из ${OliApi.prettySize(usage?.quota ?: 0)}",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

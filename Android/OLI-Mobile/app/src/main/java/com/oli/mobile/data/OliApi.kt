@@ -79,23 +79,47 @@ class OliApi private constructor() {
 
     suspend fun health(server: String): ServerHealth = withContext(Dispatchers.IO) {
         val previous = baseUrl
-        baseUrl = normalize(server)
+        val target = normalize(server)
+        if (target.isBlank()) throw ApiException("Не указан адрес сервера.")
+        baseUrl = target
         try {
             val conn = open("/api/health", "GET", null, null)
-            val json = JSONObject(read(conn))
-            conn.disconnect()
-            ServerHealth(
-                ok = json.optString("status") == "ok",
-                version = json.optString("version"),
-                registration = json.optBoolean("registration", true),
-                llama = json.optBoolean("llama", false)
-            )
+            try {
+                val json = JSONObject(read(conn))
+                ServerHealth(
+                    ok = json.optString("status") == "ok",
+                    version = json.optString("version"),
+                    registration = json.optBoolean("registration", true),
+                    llama = json.optBoolean("llama", false)
+                )
+            } finally {
+                conn.disconnect()
+            }
         } catch (e: ApiException) {
+            baseUrl = previous
             throw e
         } catch (e: Exception) {
+            baseUrl = previous
             throw ApiException("Не удалось подключиться к серверу: ${e.message ?: "ошибка сети"}")
+        }
+    }
+
+    /** Looks up the app's default (cloud) server from a small JSON endpoint. */
+    suspend fun resolveServer(directoryUrl: String): String? = withContext(Dispatchers.IO) {
+        val url = directoryUrl.trim().trimEnd('/') + "/api/oli/server"
+        val conn = URL(url).openConnection() as HttpURLConnection
+        conn.connectTimeout = 6000
+        conn.readTimeout = 6000
+        conn.setRequestProperty("Accept", "application/json")
+        try {
+            if (conn.responseCode >= 400) return@withContext null
+            val json = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+            val server = json.optString("server")
+            if (server.isBlank()) null else normalize(server)
+        } catch (_: Exception) {
+            null
         } finally {
-            if (baseUrl.isBlank()) baseUrl = previous
+            conn.disconnect()
         }
     }
 
@@ -116,7 +140,11 @@ class OliApi private constructor() {
         return AuthResult.from(json)
     }
 
-    suspend fun me(): UserProfile = UserProfile.from(call("/api/me"))
+    suspend fun me(): UserProfile {
+        val json = call("/api/me")
+        val node = json.optJSONObject("user") ?: json
+        return UserProfile.from(node)
+    }
 
     suspend fun logout() {
         try {

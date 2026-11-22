@@ -15,4 +15,4 @@ build() {
 }
 
 build assembleDebug
-build assembleRelease "-POLI_DEFAULT_SERVER=${OLI_DEFAULT_SERVER:-}"
+build assembleRelease "-POLI_DEFAULT_SERVER=${OLI_DEFAULT_SERVER:-}" "-POLI_DIRECTORY_URL=${OLI_DIRECTORY_URL:-}"

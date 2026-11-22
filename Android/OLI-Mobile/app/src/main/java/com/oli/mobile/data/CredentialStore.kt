@@ -105,6 +105,27 @@ class CredentialStore private constructor(private val context: Context) {
         get() = kv.long(KEY_QUOTA) ?: 0L
         set(value) = kv.put(KEY_QUOTA, value)
 
+    /**
+     * "default" — the OLI cloud server shipped with the app (owner's PC behind it);
+     * "custom"  — the user's own PC ("Свой сервер" in settings).
+     */
+    var serverMode: String
+        get() = kv.str(KEY_SERVER_MODE) ?: MODE_DEFAULT
+        set(value) = kv.put(KEY_SERVER_MODE, if (value == MODE_CUSTOM) MODE_CUSTOM else MODE_DEFAULT)
+
+    var customServer: String
+        get() = kv.str(KEY_CUSTOM_SERVER) ?: ""
+        set(value) = kv.put(KEY_CUSTOM_SERVER, value.trim())
+
+    /** Once the user signed in against a server, remember its address (e.g. after a link). */
+    fun rememberEndpoint(url: String) {
+        if (url.isNotBlank()) kv.put(KEY_LAST_ENDPOINT, url.trim())
+    }
+
+    var lastEndpoint: String
+        get() = kv.str(KEY_LAST_ENDPOINT) ?: ""
+        private set(value) = kv.put(KEY_LAST_ENDPOINT, value)
+
     fun saveSession(token: String, user: UserProfile, remember: Boolean, password: String?) {
         this.token = token
         this.userName = user.userName
@@ -135,6 +156,12 @@ class CredentialStore private constructor(private val context: Context) {
         private const val KEY_DISPLAY = "display"
         private const val KEY_REMEMBER = "remember"
         private const val KEY_QUOTA = "quota"
+        private const val KEY_SERVER_MODE = "server_mode"
+        private const val KEY_CUSTOM_SERVER = "custom_server"
+        private const val KEY_LAST_ENDPOINT = "last_endpoint"
+
+        const val MODE_DEFAULT = "default"
+        const val MODE_CUSTOM = "custom"
 
         @Volatile private var instance: CredentialStore? = null
 

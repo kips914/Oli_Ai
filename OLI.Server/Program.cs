@@ -43,6 +43,8 @@ for (var i = 0; i < args.Length; i++)
         case "--llama" when next is not null: options.LlamaBaseUrl = next; break;
         case "--quota-mb" when long.TryParse(next, out var mb): options.UserQuotaBytes = mb * 1024 * 1024; break;
         case "--invite" when next is not null: options.InviteCode = next; break;
+        case "--cert" when next is not null: options.CertificatePath = next; break;
+        case "--cert-password" when next is not null: options.CertificatePassword = next; break;
         case "--no-registration": options.AllowRegistration = false; break;
         case "--help" or "-h":
             Console.WriteLine("OLI Server — многопользовательский шлюз для приложения OLI Mobile.");
@@ -53,6 +55,8 @@ for (var i = 0; i < args.Length; i++)
             Console.WriteLine("  --llama <url>      адрес llama.cpp (по умолчанию http://127.0.0.1:8080)");
             Console.WriteLine("  --quota-mb <n>     квота на пользователя в МБ (по умолчанию 1024)");
             Console.WriteLine("  --invite <code>    код приглашения для регистрации");
+            Console.WriteLine("  --cert <file.pfx>  сертификат для HTTPS (иначе обычный HTTP)");
+            Console.WriteLine("  --cert-password <p> пароль сертификата");
             Console.WriteLine("  --no-registration  запретить регистрацию новых пользователей");
             return 0;
     }
@@ -75,7 +79,7 @@ catch (Exception ex)
 Console.WriteLine("======================================");
 Console.WriteLine(" OLI Server");
 Console.WriteLine("======================================");
-Console.WriteLine($" API:         {host.BaseUrl}");
+Console.WriteLine($" API:         {(options.HttpsEnabled ? "https" : "http")}://<адрес>:{options.Port}");
 Console.WriteLine($" Данные:      {options.DataRoot}");
 Console.WriteLine($" Модель:      {options.Model} @ {options.LlamaBaseUrl}");
 Console.WriteLine($" Квота:       {options.UserQuotaBytes / 1024 / 1024} МБ на пользователя");

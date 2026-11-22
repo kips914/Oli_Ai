@@ -49,7 +49,9 @@ fun ChatScreen(
     messages: List<OliRepository.ChatMessage>,
     busy: Boolean,
     displayName: String,
-    onOpenFiles: () -> Unit
+    demo: Boolean,
+    onOpenFiles: () -> Unit,
+    onExitDemo: () -> Unit
 ) {
     var input by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
@@ -60,6 +62,9 @@ fun ChatScreen(
     }
 
     Column(Modifier.fillMaxSize().imePadding()) {
+        if (demo) {
+            DemoBanner(onExitDemo)
+        }
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -67,7 +72,8 @@ fun ChatScreen(
             Column(Modifier.weight(1f)) {
                 Text("Чат", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    if (busy) "OLI думает…" else "Локальная модель на вашем ПК",
+                    if (demo) "Режим просмотра · запросы не отправляются"
+                    else if (busy) "OLI думает…" else "Локальная модель на вашем ПК",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -88,7 +94,11 @@ fun ChatScreen(
                     Text("Привет, $displayName!", style = MaterialTheme.typography.headlineSmall)
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "Спросите что угодно. OLI может искать в интернете и сохранять файлы в вашем личном пространстве на 1 ГБ.",
+                        if (demo)
+                            "Это демонстрация интерфейса: можно ходить по разделам и нажимать кнопки, " +
+                                "но сообщения не уходят на сервер. Войдите, чтобы OLI отвечал."
+                        else
+                            "Спросите что угодно. OLI может искать в интернете и сохранять файлы в вашем личном пространстве на 1 ГБ.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -116,7 +126,7 @@ fun ChatScreen(
                 OutlinedTextField(
                     value = input,
                     onValueChange = { input = it },
-                    placeholder = { Text("Сообщение…") },
+                    placeholder = { Text(if (demo) "Сообщение (в режиме просмотра не отправится)…" else "Сообщение…") },
                     modifier = Modifier.weight(1f),
                     maxLines = 5,
                     shape = RoundedCornerShape(18.dp)
@@ -190,6 +200,24 @@ private fun TypingBubble() {
                 Spacer(Modifier.width(10.dp))
                 Text("Печатает…", style = MaterialTheme.typography.bodyMedium)
             }
+        }
+    }
+}
+
+@Composable
+private fun DemoBanner(onExit: () -> Unit) {
+    Surface(color = MaterialTheme.colorScheme.secondaryContainer) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "👁 Режим просмотра",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f)
+            )
+            androidx.compose.material3.TextButton(onClick = onExit) { Text("Войти") }
         }
     }
 }

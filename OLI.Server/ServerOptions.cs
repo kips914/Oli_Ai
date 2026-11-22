@@ -41,5 +41,14 @@ public sealed class ServerOptions
         "Ты OLI — локальный ИИ-помощник. Пользователь общается с тобой через мобильное приложение. " +
         "Отвечай кратко и по делу, используй markdown-списки; длинные ответы разбивай на абзацы.";
 
-    public string BaseUrl => $"http://{Host}:{Port}";
+    /// <summary>PFX certificate to serve HTTPS directly (e.g. behind a Cloudflare Tunnel we still use HTTP).</summary>
+    public string CertificatePath { get; set; } = "";
+    public string CertificatePassword { get; set; } = "";
+
+    /// <summary>Origins allowed to call the API from a browser (the app does not care).</summary>
+    public string[] AllowedOrigins { get; set; } = ["*"];
+
+    public bool HttpsEnabled => !string.IsNullOrWhiteSpace(CertificatePath) && File.Exists(CertificatePath);
+
+    public string BaseUrl => $"{(HttpsEnabled ? "https" : "http")}://{(Host is "0.0.0.0" or "::" or "*" ? "localhost" : Host)}:{Port}";
 }

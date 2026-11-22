@@ -8,6 +8,8 @@ using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.AspNetCore.HttpOverrides;
 using OLI.Agent;
 using OLI.Core;
 using OLI.Engine;
@@ -81,13 +83,28 @@ public sealed class ServerHost : IAsyncDisposable
         builder.Logging.SetMinimumLevel(LogLevel.Warning);
         builder.WebHost.UseKestrel(options =>
         {
+            void Configure(ListenOptions listen)
+            {
+                if (_options.HttpsEnabled)
+                {
+                    listen.UseHttps(_options.CertificatePath, _options.CertificatePassword);
+                }
+            }
+
             if (IPAddress.TryParse(_options.Host, out var address))
-                options.Listen(address, _options.Port);
+                options.Listen(address, _options.Port, Configure);
             else
-                options.ListenAnyIP(_options.Port);
+                options.ListenAnyIP(_options.Port, Configure);
         });
 
+        // Behind a Cloudflare Tunnel / nginx the client IP arrives in headers.
         var app = builder.Build();
+        app.UseForwardedHeaders(new ForwardedHeadersOptions
+        {
+            ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
+            KnownNetworks = { },
+            KnownProxies = { },
+        });
         MapEndpoints(app);
         _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
 

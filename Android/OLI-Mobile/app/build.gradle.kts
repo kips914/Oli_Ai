@@ -12,13 +12,22 @@ android {
         applicationId = "com.oli.mobile"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.9.0"
+        versionCode = 3
+        versionName = "1.9.1"
 
-        // Optional default server baked into the build (Settings screen still overrides it):
-        //   ./gradlew assembleRelease -POLI_DEFAULT_SERVER=http://192.168.1.10:8765
-        val defaultServer = (project.findProperty("OLI_DEFAULT_SERVER") as String?) ?: ""
+        // The server the app connects to by itself (the OLI cloud server behind the app).
+        // Override at build time, e.g. -POLI_DEFAULT_SERVER=http://192.168.1.10:8765
+        // (build-exe/apk CI passes OLI_DEFAULT_SERVER, falling back to the env var).
+        val defaultServer = (project.findProperty("OLI_DEFAULT_SERVER") as String?)
+            ?: System.getenv("OLI_DEFAULT_SERVER")
+            ?: "https://oli-cloud.example.com"
         buildConfigField("String", "DEFAULT_SERVER", "\"$defaultServer\"")
+
+        // Optional directory that resolves the current server address ({"server": "..."}).
+        val directoryUrl = (project.findProperty("OLI_DIRECTORY_URL") as String?)
+            ?: System.getenv("OLI_DIRECTORY_URL")
+            ?: ""
+        buildConfigField("String", "DIRECTORY_URL", "\"$directoryUrl\"")
     }
 
     buildTypes {

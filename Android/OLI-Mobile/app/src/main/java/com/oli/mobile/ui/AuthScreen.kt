@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -27,6 +28,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -34,6 +36,7 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -48,20 +51,20 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.oli.mobile.BuildConfig
 import com.oli.mobile.data.OliApi
 import com.oli.mobile.data.OliRepository
+import com.oli.mobile.data.ServerHealth
 import kotlinx.coroutines.launch
 
 /**
- * Sign-in / registration against the OLI server running on the user's PC.
- * The password is sent once, then kept only in the Keystore-encrypted store.
+ * Sign-in / registration against the OLI server. The app picks the server by itself
+ * (the default OLI server, or the user's own PC when that mode is on in Settings);
+ * the address field is hidden unless the user opens it explicitly.
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-fun AuthScreen(repo: OliRepository) {
+fun AuthScreen(repo: OliRepository, defaultServerOffline: Boolean, onDemo: () -> Unit) {
     var registering by remember { mutableStateOf(false) }
-    var server by remember { mutableStateOf(repo.serverUrl.ifBlank { BuildConfig.DEFAULT_SERVER }) }
     var userName by remember { mutableStateOf(repo.lastUserName) }
     var displayName by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -72,13 +75,35 @@ fun AuthScreen(repo: OliRepository) {
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var info by remember { mutableStateOf<String?>(null) }
-    var advanced by remember { mutableStateOf(server.isBlank() || registering) }
+    var health by remember { mutableStateOf<ServerHealth?>(null) }
+    var checking by remember { mutableStateOf(true) }
+    var ownServer by remember { mutableStateOf(repo.usingOwnServer) }
+    var serverField by remember { mutableStateOf(repo.customServer) }
+    var showServerField by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+
+    // The app connects by itself on open; the user does not type an address.
+    LaunchedEffect(Unit) {
+        checking = true
+        health = if (repo.usingOwnServer) {
+            runCatching { repo.useOwnServer(repo.customServer) }.getOrNull()
+        } else {
+            repo.probeDefaultServer()
+        }
+        if (health == null) {
+            showServerField = true
+            ownServer = repo.usingOwnServer
+            error = if (repo.usingOwnServer)
+                "Свой сервер не отвечает. Проверьте адрес и что сервер запущен на ПК."
+            else
+                "Сервер OLI сейчас недоступен. Можно посмотреть интерфейс без входа или подключить свой ПК."
+        }
+        checking = false
+    }
 
     fun submit() {
         error = null
         info = null
-        if (server.isBlank()) { error = "Укажите адрес сервера, например 192.168.1.10:8765"; return }
         if (userName.isBlank()) { error = "Введите логин"; return }
         if (!OliApi.validPassword(password)) {
             error = "Пароль: минимум 8 символов, буквы и цифры"
@@ -95,9 +120,9 @@ fun AuthScreen(repo: OliRepository) {
                         busy = false
                         return@launch
                     }
-                    repo.register(server, userName.trim(), password, displayName.trim(), invite.trim(), remember)
+                    repo.register(repo.serverUrl, userName.trim(), password, displayName.trim(), invite.trim(), remember)
                 } else {
-                    repo.login(server, userName.trim(), password, remember)
+                    repo.login(repo.serverUrl, userName.trim(), password, remember)
                 }
             } catch (e: Exception) {
                 error = e.message ?: "Не удалось войти"
@@ -125,7 +150,7 @@ fun AuthScreen(repo: OliRepository) {
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
                 .imePadding()
-                .padding(horizontal = 22.dp, vertical = 36.dp),
+                .padding(horizontal = 22.dp, vertical = 30.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text("OLI", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.primary)
@@ -133,8 +158,18 @@ fun AuthScreen(repo: OliRepository) {
                 "Ваш ИИ на вашем компьютере",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp, bottom = 24.dp)
+                modifier = Modifier.padding(top = 4.dp, bottom = 14.dp)
             )
+
+            ServerBadge(
+                checking = checking,
+                health = health,
+                ownServer = ownServer,
+                address = repo.serverUrl,
+                onClick = { showServerField = !showServerField }
+            )
+
+            Spacer(Modifier.height(16.dp))
 
             Card(
                 shape = RoundedCornerShape(22.dp),
@@ -151,12 +186,12 @@ fun AuthScreen(repo: OliRepository) {
                         ) { Text("Вход") }
                         SegmentedButton(
                             selected = registering,
-                            onClick = { registering = true; error = null; advanced = true },
+                            onClick = { registering = true; error = null },
                             shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
                         ) { Text("Регистрация") }
                     }
 
-                    Spacer(Modifier.height(18.dp))
+                    Spacer(Modifier.height(16.dp))
 
                     OutlinedTextField(
                         value = userName,
@@ -227,7 +262,7 @@ fun AuthScreen(repo: OliRepository) {
                     }
 
                     Row(
-                        Modifier.fillMaxWidth().padding(top = 6.dp),
+                        Modifier.fillMaxWidth().padding(top = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Checkbox(checked = remember, onCheckedChange = { remember = it }, enabled = !busy)
@@ -240,33 +275,10 @@ fun AuthScreen(repo: OliRepository) {
 
                     Text(
                         "Пароль хранится в защищённом хранилище Android (шифрование ключом из Keystore). " +
-                            "На сервере остаётся только хеш — администратор не может его прочитать.",
+                            "На сервере остаётся только хеш — его не может прочитать даже владелец сервера.",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-
-                    TextButton(onClick = { advanced = !advanced }, modifier = Modifier.padding(top = 6.dp)) {
-                        Text(if (advanced) "Скрыть адрес сервера" else "Указать адрес сервера")
-                    }
-
-                    if (advanced) {
-                        OutlinedTextField(
-                            value = server,
-                            onValueChange = { server = it },
-                            label = { Text("Сервер (IP компьютера:порт)") },
-                            placeholder = { Text("192.168.1.10:8765") },
-                            singleLine = true,
-                            enabled = !busy,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        Text(
-                            "Адрес показан в OLI на компьютере: «Пульт админа» → адрес для телефона.",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 4.dp)
-                        )
-                    }
 
                     if (error != null) {
                         Text(
@@ -293,7 +305,7 @@ fun AuthScreen(repo: OliRepository) {
                     ) {
                         if (busy) {
                             CircularProgressIndicator(
-                                modifier = Modifier.width(20.dp).height(20.dp),
+                                modifier = Modifier.size(20.dp),
                                 strokeWidth = 2.dp,
                                 color = MaterialTheme.colorScheme.onPrimary
                             )
@@ -302,26 +314,109 @@ fun AuthScreen(repo: OliRepository) {
                         Text(if (registering) "Создать аккаунт" else "Войти", style = MaterialTheme.typography.titleMedium)
                     }
 
-                    TextButton(
-                        onClick = {
-                            if (server.isBlank()) { error = "Сначала укажите адрес сервера"; return@TextButton }
-                            busy = true
-                            error = null
-                            scope.launch {
-                                try {
-                                    val health = repo.setServer(server)
-                                    info = "Сервер доступен · версия ${health.version.ifBlank { "?" }} · " +
-                                        if (health.registration) "регистрация открыта" else "регистрация закрыта"
-                                } catch (e: Exception) {
-                                    error = e.message
-                                } finally {
-                                    busy = false
-                                }
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) { Text("Проверить соединение", textAlign = TextAlign.Center) }
+                    OutlinedButton(
+                        onClick = onDemo,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth().padding(top = 10.dp).height(48.dp)
+                    ) {
+                        Text("👁 Посмотреть без входа")
+                    }
+                    Text(
+                        "Режим просмотра: интерфейс и кнопки работают, но запросы никуда не уходят.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                    )
                 }
+            }
+
+            if (showServerField) {
+                Spacer(Modifier.height(14.dp))
+                Card(
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Сервер", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "По умолчанию приложение подключается к серверу OLI само. " +
+                                "Свой ПК включается здесь или в настройках.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+
+                        Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(
+                                checked = ownServer,
+                                onCheckedChange = { enabled ->
+                                    ownServer = enabled
+                                    scope.launch {
+                                        checking = true
+                                        error = null
+                                        health = if (enabled && serverField.isNotBlank()) {
+                                            runCatching { repo.useOwnServer(serverField) }
+                                                .onFailure { error = it.message }
+                                                .getOrNull()
+                                        } else {
+                                            runCatching { repo.useDefaultServer() }.getOrNull()
+                                        }
+                                        checking = false
+                                    }
+                                }
+                            )
+                            Text("Свой ПК как сервер", style = MaterialTheme.typography.bodyMedium)
+                        }
+
+                        if (ownServer) {
+                            OutlinedTextField(
+                                value = serverField,
+                                onValueChange = { serverField = it },
+                                label = { Text("IP компьютера:порт") },
+                                placeholder = { Text("192.168.1.10:8765") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
+                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                            )
+                            Row(
+                                Modifier.padding(top = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Button(
+                                    enabled = serverField.isNotBlank(),
+                                    onClick = {
+                                        scope.launch {
+                                            checking = true
+                                            error = null
+                                            try {
+                                                health = repo.useOwnServer(serverField)
+                                                info = "Свой сервер доступен"
+                                            } catch (e: Exception) {
+                                                health = null
+                                                error = "Свой сервер не отвечает: ${e.message}"
+                                            } finally {
+                                                checking = false
+                                            }
+                                        }
+                                    }
+                                ) { Text("Подключиться") }
+                                TextButton(onClick = { showServerField = false }) { Text("Скрыть") }
+                            }
+                            Text(
+                                "Адрес показан в OLI на компьютере: «Пульт админа» → адрес для телефона.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                        } else {
+                            TextButton(onClick = { showServerField = false }) { Text("Скрыть") }
+                        }
+                    }
+                }
+            } else {
+                TextButton(onClick = { showServerField = true }) { Text("Настроить сервер") }
             }
 
             Text(
@@ -329,8 +424,58 @@ fun AuthScreen(repo: OliRepository) {
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
-                modifier = Modifier.padding(top = 20.dp)
+                modifier = Modifier.padding(top = 14.dp)
             )
+
+            if (defaultServerOffline && !showServerField) {
+                Text(
+                    "Сервер OLI недоступен — можно посмотреть интерфейс или подключить свой ПК.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 6.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ServerBadge(
+    checking: Boolean,
+    health: ServerHealth?,
+    ownServer: Boolean,
+    address: String,
+    onClick: () -> Unit
+) {
+    val (dot, text) = when {
+        checking -> MaterialTheme.colorScheme.onSurfaceVariant to "Подключаюсь к серверу…"
+        health != null && ownServer -> MaterialTheme.colorScheme.secondary to "Свой ПК · подключено"
+        health != null -> MaterialTheme.colorScheme.secondary to "Сервер OLI · подключено"
+        else -> MaterialTheme.colorScheme.error to "Сервер не отвечает"
+    }
+
+    Card(
+        onClick = onClick,
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(9.dp).background(dot, RoundedCornerShape(50)))
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(text, style = MaterialTheme.typography.labelMedium)
+                if (address.isNotBlank()) {
+                    Text(
+                        address.replace("http://", "").replace("https://", ""),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            if (checking) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+            else Text("изменить", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
         }
     }
 }
