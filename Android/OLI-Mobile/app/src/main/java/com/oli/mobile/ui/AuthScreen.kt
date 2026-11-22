@@ -57,6 +57,7 @@ import kotlinx.coroutines.launch
  * Sign-in / registration against the OLI server running on the user's PC.
  * The password is sent once, then kept only in the Keystore-encrypted store.
  */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun AuthScreen(repo: OliRepository) {
     var registering by remember { mutableStateOf(false) }

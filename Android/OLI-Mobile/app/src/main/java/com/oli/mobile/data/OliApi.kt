@@ -4,7 +4,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.BufferedReader
 import java.io.DataOutputStream
 import java.io.InputStream
 import java.io.InputStreamReader
@@ -53,7 +52,7 @@ class OliApi private constructor() {
         } catch (e: Exception) {
             conn.errorStream ?: throw ApiException("Сервер недоступен (${conn.responseCode})", conn.responseCode)
         }
-        val text = stream.bufferedReader().use(BufferedReader::readText)
+        val text = stream.bufferedReader().use { it.readText() }
         if (conn.responseCode >= 400) {
             val message = try {
                 JSONObject(text).optString("error").ifBlank { "Ошибка ${conn.responseCode}" }

@@ -58,27 +58,9 @@ jobs:
           gradle-version: '8.11.1'
 
       - name: Build debug + release APK
-        working-directory: Android/OLI-Mobile
-        run: |
-          set +e
-          gradle --no-daemon assembleDebug > ../build-debug.log 2>&1
-          rc=$?
-          if [ $rc -ne 0 ]; then
-            echo "::group::debug build log"
-            grep -E "^e: |error:|FAILURE:|What went wrong|Caused by|> Task .* FAILED|Could not" -A2 ../build-debug.log | head -80
-            echo "::endgroup::"
-            tail -40 ../build-debug.log
-            exit $rc
-          fi
-          gradle --no-daemon assembleRelease -POLI_DEFAULT_SERVER="${{ github.event.inputs.default_server }}" > ../build-release.log 2>&1
-          rc=$?
-          if [ $rc -ne 0 ]; then
-            echo "::group::release build log"
-            grep -E "^e: |error:|FAILURE:|What went wrong|Caused by|> Task .* FAILED|Could not" -A2 ../build-release.log | head -80
-            echo "::endgroup::"
-            tail -40 ../build-release.log
-            exit $rc
-          fi
+        env:
+          OLI_DEFAULT_SERVER: ${{ github.event.inputs.default_server }}
+        run: bash Android/ci/gradle-build.sh
 
       - name: Collect artifacts
         run: |
