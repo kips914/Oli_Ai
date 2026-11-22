@@ -82,7 +82,7 @@ Console.WriteLine($" Квота:       {options.UserQuotaBytes / 1024 / 1024} М
 Console.WriteLine($" Регистрация: {(options.AllowRegistration ? "открыта" : "закрыта")}");
 Console.WriteLine();
 
-foreach (var ip in Oli.Core.NetworkAddresses.Local())
+foreach (var ip in NetworkAddresses.Local())
     Console.WriteLine($" Телефону указывать: http://{ip}:{options.Port}");
 
 Console.WriteLine();
