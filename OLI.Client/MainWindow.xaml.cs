@@ -278,7 +278,7 @@ public partial class MainWindow : Window
     {
         if (_display.Count == 0) _display.Add(new ChatMessage("assistant", content));
         else _display[^1] = new ChatMessage(_display[^1].Role, content);
-        if (ChatList.Items.Count > 0) ChatList.ScrollIntoView(ChatList.Items[^1]);
+        ScrollToEnd();
     }
 
     private string RelativeToWorkspace(string path)
@@ -451,9 +451,9 @@ public partial class MainWindow : Window
         }
         try
         {
-            var full = Path.Combine(_workspace.Root, path.Replace('/', Path.DirectorySeparatorChar));
-            if (!File.Exists(full)) { MessageBox.Show(this, "Файл не найден.", "OLI"); return; }
-            Process.Start(new ProcessStartInfo(full) { UseShellExecute = true });
+            var filePath = Path.Combine(_workspace.Root, path.Replace('/', Path.DirectorySeparatorChar));
+            if (!File.Exists(filePath)) { MessageBox.Show(this, "Файл не найден.", "OLI"); return; }
+            Process.Start(new ProcessStartInfo(filePath) { UseShellExecute = true });
         }
         catch (Exception ex)
         {
