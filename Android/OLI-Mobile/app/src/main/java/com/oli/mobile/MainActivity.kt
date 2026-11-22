@@ -5,7 +5,14 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -15,8 +22,6 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -28,6 +33,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -36,6 +43,8 @@ import com.oli.mobile.data.UserProfile
 import com.oli.mobile.ui.AuthScreen
 import com.oli.mobile.ui.ChatScreen
 import com.oli.mobile.ui.FilesScreen
+import com.oli.mobile.ui.OliBottomBar
+import com.oli.mobile.ui.OliInk
 import com.oli.mobile.ui.OliTheme
 import com.oli.mobile.ui.SettingsScreen
 
@@ -101,17 +110,13 @@ private fun OliApp() {
             }
 
             Scaffold(
+                containerColor = OliInk,
                 bottomBar = {
-                    NavigationBar {
-                        Tab.entries.forEach { entry ->
-                            NavigationBarItem(
-                                selected = tab == entry,
-                                onClick = { tab = entry },
-                                icon = { Icon(entry.icon, contentDescription = entry.label) },
-                                label = { Text(entry.label) }
-                            )
-                        }
-                    }
+                    OliBottomBar(
+                        current = tab.ordinal,
+                        labels = Tab.entries.map { it.icon to it.label },
+                        onSelect = { tab = Tab.entries[it] }
+                    )
                 }
             ) { padding ->
                 Box(Modifier.fillMaxSize().padding(padding)) {
@@ -123,7 +128,8 @@ private fun OliApp() {
                             displayName = if (demo) "гость" else user.displayName,
                             demo = demo,
                             onOpenFiles = { filesPath = ""; tab = Tab.Files },
-                            onExitDemo = { repo.exitDemo() }
+                            onExitDemo = { repo.exitDemo() },
+                            onOpenSettings = { tab = Tab.Settings }
                         )
 
                         Tab.Files -> FilesScreen(

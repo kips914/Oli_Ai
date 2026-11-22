@@ -1,6 +1,5 @@
 package com.oli.mobile.ui
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
@@ -11,47 +10,79 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
-private val Accent = Color(0xFF5B8CFF)
-private val AccentDark = Color(0xFF3F6FE0)
+// ---------------------------------------------------------------- palette
+// Near-black canvas, soft glass surfaces and one vivid blue accent (the OLI orb).
+
+val OliInk = Color(0xFF050507)
+val OliSurface = Color(0xFF111216)
+val OliGlass = Color(0xFF1A1C21)
+val OliGlassSoft = Color(0xFF212430)
+val OliOutline = Color(0xFF2B2E38)
+val OliText = Color(0xFFF1F2F5)
+val OliTextMuted = Color(0xFF9AA0AC)
+
+val OliBlue = Color(0xFF3B7DF7)
+val OliBlueBright = Color(0xFF7FB2FF)
+val OliBlueDeep = Color(0xFF14274F)
 
 private val Dark = darkColorScheme(
-    primary = Accent,
+    primary = OliBlue,
     onPrimary = Color.White,
-    primaryContainer = Color(0xFF1E2A47),
-    onPrimaryContainer = Color(0xFFD7E2FF),
+    primaryContainer = Color(0xFF1B2C4E),
+    onPrimaryContainer = Color(0xFFD8E5FF),
     secondary = Color(0xFF7FD1AE),
-    background = Color(0xFF101319),
-    onBackground = Color(0xFFE7EAF0),
-    surface = Color(0xFF171B23),
-    onSurface = Color(0xFFE7EAF0),
-    surfaceVariant = Color(0xFF222835),
-    onSurfaceVariant = Color(0xFFAEB6C6),
-    error = Color(0xFFFF6B6B)
+    onSecondary = Color(0xFF07130E),
+    secondaryContainer = Color(0xFF182A24),
+    onSecondaryContainer = Color(0xFFC9F0DF),
+    tertiary = OliBlueBright,
+    background = OliInk,
+    onBackground = OliText,
+    surface = OliSurface,
+    onSurface = OliText,
+    surfaceVariant = OliGlass,
+    onSurfaceVariant = OliTextMuted,
+    surfaceContainer = Color(0xFF0C0D10),
+    surfaceContainerHigh = OliGlass,
+    surfaceContainerHighest = OliGlassSoft,
+    outline = OliOutline,
+    outlineVariant = Color(0xFF23262E),
+    error = Color(0xFFFF6B6B),
+    onError = Color.White,
+    scrim = Color(0xCC000000)
 )
 
 private val Light = lightColorScheme(
-    primary = AccentDark,
+    primary = Color(0xFF2A63D8),
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFDCE6FF),
-    onPrimaryContainer = Color(0xFF102044),
+    primaryContainer = Color(0xFFDCE7FF),
+    onPrimaryContainer = Color(0xFF0C1C3C),
     secondary = Color(0xFF2E8B68),
-    background = Color(0xFFF5F7FB),
-    onBackground = Color(0xFF141821),
+    background = Color(0xFFF6F7FA),
+    onBackground = Color(0xFF101218),
     surface = Color.White,
-    onSurface = Color(0xFF141821),
-    surfaceVariant = Color(0xFFEDF1F8),
-    onSurfaceVariant = Color(0xFF4E5769),
+    onSurface = Color(0xFF101218),
+    surfaceVariant = Color(0xFFECEEF4),
+    onSurfaceVariant = Color(0xFF565C69),
+    outline = Color(0xFFD5D9E2),
     error = Color(0xFFC62828)
 )
 
+/**
+ * OLI is a dark-first app: the chat canvas stays near-black like the reference design.
+ * The light scheme is kept for completeness (system/accessibility use).
+ */
 @Composable
-fun OliTheme(darkTheme: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
+fun OliTheme(darkTheme: Boolean = true, content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = if (darkTheme) Dark else Light,
         typography = Typography(
-            headlineSmall = TextStyle(fontSize = 22.sp, fontWeight = FontWeight.SemiBold),
+            headlineLarge = TextStyle(fontSize = 34.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.5).sp),
+            headlineSmall = TextStyle(fontSize = 24.sp, fontWeight = FontWeight.Medium, letterSpacing = (-0.2).sp),
             titleMedium = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.SemiBold),
-            bodyMedium = TextStyle(fontSize = 15.sp, lineHeight = 21.sp)
+            bodyLarge = TextStyle(fontSize = 17.sp, lineHeight = 25.sp),
+            bodyMedium = TextStyle(fontSize = 15.sp, lineHeight = 22.sp),
+            labelMedium = TextStyle(fontSize = 12.5.sp, fontWeight = FontWeight.Medium),
+            labelSmall = TextStyle(fontSize = 11.5.sp, lineHeight = 15.sp)
         ),
         content = content
     )

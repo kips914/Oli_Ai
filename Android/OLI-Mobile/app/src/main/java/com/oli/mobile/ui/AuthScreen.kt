@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -135,25 +136,23 @@ fun AuthScreen(repo: OliRepository, defaultServerOffline: Boolean, onDemo: () ->
     Box(
         Modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    listOf(
-                        MaterialTheme.colorScheme.background,
-                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
-                        MaterialTheme.colorScheme.background
-                    )
-                )
-            )
+            .background(OliInk)
     ) {
         Column(
             Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
                 .imePadding()
-                .padding(horizontal = 22.dp, vertical = 30.dp),
+                .statusBarsPadding()
+                .padding(horizontal = 22.dp, vertical = 22.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text("OLI", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.primary)
+            Box(contentAlignment = Alignment.Center) {
+                OrbitRing(size = 150.dp, dots = 3)
+                OliOrb(size = 84.dp)
+            }
+            Spacer(Modifier.height(14.dp))
+            Text("OLI", style = MaterialTheme.typography.headlineLarge, color = OliText)
             Text(
                 "Ваш ИИ на вашем компьютере",
                 style = MaterialTheme.typography.bodyMedium,
