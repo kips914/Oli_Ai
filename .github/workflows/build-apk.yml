@@ -1,6 +1,13 @@
 name: Build OLI Mobile APK
 
 on:
+  # Called by build-apk-tag.yml for release tags (path filters don't apply to tags).
+  workflow_call:
+    inputs:
+      default_server:
+        type: string
+        required: false
+        default: ''
   push:
     branches: [main, 'arena/**']
     paths:

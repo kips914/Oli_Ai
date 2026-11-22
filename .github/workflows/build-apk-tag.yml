@@ -1,0 +1,15 @@
+name: Release APK on tag
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    uses: ./.github/workflows/build-apk.yml
+    permissions:
+      contents: write
