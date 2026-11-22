@@ -148,8 +148,8 @@ fun AuthScreen(repo: OliRepository, defaultServerOffline: Boolean, onDemo: () ->
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Box(contentAlignment = Alignment.Center) {
-                OrbitRing(size = 150.dp, dots = 3)
-                OliOrb(size = 84.dp)
+                OliBurst(size = 180.dp)
+                OliMark(size = 92.dp)
             }
             Spacer(Modifier.height(14.dp))
             Text("OLI", style = MaterialTheme.typography.headlineLarge, color = OliText)

@@ -197,7 +197,7 @@ private fun LimitRow(label: String, used: Long, limit: Long) {
                     .fillMaxWidth(fraction)
                     .height(6.dp)
                     .background(
-                        if (fraction > 0.9f) Color(0xFFFFB020)
+                        if (fraction > 0.9f) androidx.compose.ui.graphics.SolidColor(Color(0xFFFFB020))
                         else Brush.horizontalGradient(listOf(OliBlue, OliCyan))
                     )
             )

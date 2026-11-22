@@ -412,7 +412,7 @@ private fun Composer(
                             .fillMaxWidth(animated)
                             .height(3.dp)
                             .background(
-                                if (usage.exhausted) Color(0xFFFFB020)
+                                if (usage.exhausted) SolidColor(Color(0xFFFFB020))
                                 else Brush.horizontalGradient(listOf(OliBlue, OliBlueBright))
                             )
                     )
