@@ -193,10 +193,16 @@ class OliApi private constructor() {
             JSONObject().put("path", path).put("content", content).put("append", false)
         ).optString("message", "Сохранено")
 
-    fun downloadUrl(path: String): String =
-        baseUrl + "/api/files/download?path=" + URLEncoder.encode(path, "UTF-8")
-
-    fun archiveUrl(): String = baseUrl + "/api/files/archive"
+    /** Saves the whole workspace as a zip via the authenticated endpoint. */
+    suspend fun downloadArchive(name: String, sink: (InputStream) -> Long): Long = withContext(Dispatchers.IO) {
+        val conn = open("/api/files/archive", "GET", null, null)
+        try {
+            if (conn.responseCode >= 400) read(conn)
+            conn.inputStream.use(sink)
+        } finally {
+            conn.disconnect()
+        }
+    }
 
     /** Downloads a file into local storage; returns the received byte count. */
     suspend fun download(path: String, sink: (InputStream) -> Long): Long = withContext(Dispatchers.IO) {

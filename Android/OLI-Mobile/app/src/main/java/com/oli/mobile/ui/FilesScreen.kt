@@ -244,11 +244,20 @@ fun FilesScreen(
                         horizontalArrangement = Arrangement.Center
                     ) {
                         TextButton(onClick = {
-                            val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(repo.archiveUrl()))
-                            runCatching { context.startActivity(intent) }
-                                .onFailure {
-                                    message = "Скачайте архив на ПК: ${repo.archiveUrl()}"
+                            scope.launch {
+                                loading = true
+                                val targetDir = File(context.getExternalFilesDir(null), "downloads").apply { mkdirs() }
+                                val target = File(targetDir, "workspace-${System.currentTimeMillis()}.zip")
+                                val result = repo.downloadArchive("workspace.zip") { input ->
+                                    target.outputStream().use { output -> input.copyTo(output) }
+                                    target.length()
                                 }
+                                message = result.fold(
+                                    onSuccess = { "Архив сохранён: ${target.absolutePath} (${OliApi.prettySize(it)})" },
+                                    onFailure = { "Ошибка: ${it.message}" }
+                                )
+                                loading = false
+                            }
                         }) {
                             Icon(Icons.Filled.Archive, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))

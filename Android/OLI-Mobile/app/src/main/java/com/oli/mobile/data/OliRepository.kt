@@ -199,6 +199,9 @@ class OliRepository(private val context: Context) {
         Result.failure(e)
     }
 
-    fun downloadUrl(path: String): String = api.downloadUrl(path)
-    fun archiveUrl(): String = api.archiveUrl()
+    suspend fun downloadArchive(name: String, sink: (java.io.InputStream) -> Long): Result<Long> = try {
+        Result.success(api.downloadArchive(name, sink))
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
 }
