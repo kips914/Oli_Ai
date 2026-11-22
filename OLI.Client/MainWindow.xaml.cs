@@ -192,6 +192,8 @@ public partial class MainWindow : Window
         _settings.Server.AdminToken = ServerAdminTokenBox.Text.Trim();
         // Keep the desktop app's 1 GB workspace setting in sync with the server quota default.
         _settings.WorkspaceQuotaBytes = _settings.Server.UserQuotaBytes;
+        // Remember that the server was running, so it comes back on the next launch.
+        if (serverRunning) _settings.Server.Enabled = true;
 
         _settings.Telegram.Enabled = TelegramEnabledToggle.IsChecked == true;
         _settings.Telegram.BotToken = TelegramTokenBox.Password.Trim();
@@ -758,8 +760,8 @@ public partial class MainWindow : Window
     {
         try
         {
-            PersistSettings();
             _settings.Server.Enabled = true;
+            PersistSettings();
             _serverHost ??= CreateServerHost();
             await _serverHost.StartAsync();
             RefreshServerUi();
@@ -776,6 +778,8 @@ public partial class MainWindow : Window
     {
         if (_serverHost is null) return;
         await _serverHost.StopAsync();
+        _settings.Server.Enabled = false;
+        PersistSettings();
         RefreshServerUi();
     }
 
