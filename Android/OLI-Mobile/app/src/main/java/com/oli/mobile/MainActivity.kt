@@ -124,7 +124,8 @@ private fun OliApp() {
                     demo = demo,
                     onSignedOut = { overlay = Overlay.None },
                     onExitDemo = { repo.exitDemo(); overlay = Overlay.None },
-                    onBack = { overlay = Overlay.None }
+                    onBack = { overlay = Overlay.None },
+                    onOpenAbout = { overlay = Overlay.About }
                 )
 
                 Overlay.About -> com.oli.mobile.ui.AboutScreen(onBack = { overlay = Overlay.None })

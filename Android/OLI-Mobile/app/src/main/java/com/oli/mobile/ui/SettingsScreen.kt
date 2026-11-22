@@ -51,7 +51,8 @@ fun SettingsScreen(
     demo: Boolean,
     onSignedOut: () -> Unit,
     onExitDemo: () -> Unit,
-    onBack: () -> Unit = {}
+    onBack: () -> Unit = {},
+    onOpenAbout: () -> Unit = {}
 ) {
     var ownServer by remember { mutableStateOf(repo.usingOwnServer) }
     var serverField by remember { mutableStateOf(repo.customServer) }
@@ -296,6 +297,10 @@ fun SettingsScreen(
             }
         }
 
+        Spacer(Modifier.height(16.dp))
+        OutlinedButton(onClick = onOpenAbout, modifier = Modifier.fillMaxWidth()) {
+            Text("Возможности OLI")
+        }
         Spacer(Modifier.height(20.dp))
         Text(
             "OLI Mobile · модель работает на компьютере, телефон — пульт. " +
@@ -303,8 +308,6 @@ fun SettingsScreen(
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-    }
-
         }
     }
 
