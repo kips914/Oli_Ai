@@ -139,14 +139,14 @@ public sealed class ServerHost : IAsyncDisposable
             endpoints = new[] { "/api/health", "/api/register", "/api/login", "/api/me", "/api/chat", "/api/files" },
         }));
 
-        app.MapGet("/api/health", () => Results.Json(new
+        app.MapGet("/api/health", async (CancellationToken ct) => Results.Json(new
         {
             status = "ok",
             service = "oli-server",
             version = AppVersion.Current,
             time = DateTimeOffset.UtcNow,
             registration = _options.AllowRegistration,
-            llama = _llama.IsAliveAsync().GetAwaiter().GetResult(),
+            llama = await _llama.IsAliveAsync(ct),
         }));
 
         // ------------------------------------------------------------ auth
@@ -436,7 +436,7 @@ public sealed class ServerHost : IAsyncDisposable
             return ok ? Results.Json(new { ok = true }) : Results.Json(new { error = "Пользователь не найден." }, statusCode: 404);
         });
 
-        app.MapGet("/api/admin/stats", (HttpContext http) =>
+        app.MapGet("/api/admin/stats", async (HttpContext http, CancellationToken ct) =>
         {
             if (!IsAdminRequest(http)) return Unauthorized();
             var users = _accounts.List();
@@ -449,7 +449,7 @@ public sealed class ServerHost : IAsyncDisposable
                 used = users.Sum(u => _workspaces.Get(u.Id, u.QuotaBytes).Usage().UsedBytes),
                 dataRoot = _options.DataRoot,
                 model = _options.Model,
-                llama = _llama.IsAliveAsync().GetAwaiter().GetResult(),
+                llama = await _llama.IsAliveAsync(ct),
             });
         });
     }
