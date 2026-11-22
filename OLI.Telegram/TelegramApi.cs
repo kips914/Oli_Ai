@@ -15,6 +15,7 @@ public sealed class TelegramApi : IDisposable
     private readonly string _token;
     private readonly List<IHttpTunnel> _tunnels;
     private int _preferred;
+    private readonly DohPinnedTunnel? _dohTunnel;
 
     public TelegramApi(string token, bool useDoh, string? relayBaseUrl, string? proxyUrl, string? relaySecret = null)
     {
@@ -26,7 +27,10 @@ public sealed class TelegramApi : IDisposable
         if (!string.IsNullOrWhiteSpace(proxyUrl))
             _tunnels.Add(new ProxyTunnel(proxyUrl));
         if (useDoh)
-            _tunnels.Add(new DohPinnedTunnel(http: DirectTunnel.Create()));
+        {
+            _dohTunnel = new DohPinnedTunnel();
+            _tunnels.Add(_dohTunnel);
+        }
         _tunnels.Add(new DirectTunnel(http: DirectTunnel.Create()));
 
         OliLog.Info("TELEGRAM", "Цепочка транспортов: " + string.Join(" → ", _tunnels.Select(t => t.Name)));
@@ -41,6 +45,10 @@ public sealed class TelegramApi : IDisposable
     }
 
     public string ActiveTunnel => _tunnels.Count == 0 ? "none" : _tunnels[_preferred].Name;
+
+    /// <summary>IP the DoH transport resolved for api.telegram.org (diagnostics).</summary>
+    public Task<System.Net.IPAddress?> ResolveDohAsync(CancellationToken ct = default) =>
+        _dohTunnel?.ResolveAsync(ct) ?? Task.FromResult<System.Net.IPAddress?>(null);
 
     public async Task<JsonElement> CallAsync(string method, Dictionary<string, object?>? parameters, CancellationToken ct)
     {
@@ -58,12 +66,34 @@ public sealed class TelegramApi : IDisposable
                 using var response = await tunnel.SendAsync(method, content, _token, ct);
                 var body = await response.Content.ReadAsStringAsync(ct);
 
-                if ((int)response.StatusCode is >= 400 and < 500 && (int)response.StatusCode != 429)
+                if ((int)response.StatusCode is 400 or 401 or 403 or 404)
                 {
-                    // Genuine API error (bad token, chat not found) — do not retry
-                    // through other transports, it would fail identically.
+                    // Genuine API error (bad token, chat not found) — retrying through
+                    // another transport would fail identically.
                     _preferred = index;
                     throw new TelegramApiException(ParseDescription(body) ?? $"HTTP {(int)response.StatusCode}", (int)response.StatusCode);
+                }
+
+                if ((int)response.StatusCode == 429)
+                {
+                    // Rate limited: Telegram asked us to wait. Surface it to the caller
+                    // instead of hammering the API through every tunnel.
+                    throw new TelegramRateLimitedException(
+                        ParseDescription(body) ?? "Too Many Requests",
+                        ParseRetryAfter(body));
+
+                    static int ParseRetryAfter(string json)
+                    {
+                        try
+                        {
+                            using var parsed = JsonDocument.Parse(json);
+                            if (parsed.RootElement.TryGetProperty("parameters", out var pars) &&
+                                pars.TryGetProperty("retry_after", out var retry) && retry.TryGetInt32(out var value))
+                                return Math.Clamp(value, 1, 300);
+                        }
+                        catch { }
+                        return 5;
+                    }
                 }
 
                 if (!response.IsSuccessStatusCode)
@@ -163,6 +193,12 @@ public sealed record TelegramFile(string Path, string FileName, string ContentTy
 public sealed class TelegramApiException(string message, int code) : Exception(message)
 {
     public int Code { get; } = code;
+}
+
+/// <summary>Telegram answered 429; the bot should pause for RetryAfterSeconds.</summary>
+public sealed class TelegramRateLimitedException(string message, int retryAfterSeconds) : Exception(message)
+{
+    public int RetryAfterSeconds { get; } = retryAfterSeconds;
 }
 
 public sealed class TelegramUnavailableException(string message, Exception? inner) : Exception(message, inner);

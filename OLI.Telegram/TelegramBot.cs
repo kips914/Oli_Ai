@@ -140,6 +140,11 @@ public sealed class TelegramBot : IAsyncDisposable
                 SetStatus($"нет связи: {ex.Message}");
                 await DelaySafe(TimeSpan.FromSeconds(20), ct);
             }
+            catch (TelegramRateLimitedException ex)
+            {
+                OliLog.Warning("TELEGRAM", $"Слишком много запросов, пауза {ex.RetryAfterSeconds} с");
+                await DelaySafe(TimeSpan.FromSeconds(ex.RetryAfterSeconds), ct);
+            }
             catch (TelegramApiException ex) when (ex.Code == 409)
             {
                 SetStatus("конфликт getUpdates (бот уже запущен в другом месте)");
@@ -546,7 +551,13 @@ public sealed class TelegramBot : IAsyncDisposable
             settings.ProxyUrl, settings.RelaySecret);
         var me = await api.CallAsync("getMe", null, ct);
         var username = me.TryGetProperty("username", out var u) ? u.GetString() : "?";
-        return $"OK @{username} через {api.ActiveTunnel}";
+        var mode = api.ActiveTunnel;
+        if (settings.DohFallback)
+        {
+            var ip = await api.ResolveDohAsync(ct);
+            if (ip is not null) mode += $" (DoH: api.telegram.org → {ip})";
+        }
+        return $"OK @{username} через {mode}";
     }
 
     public async ValueTask DisposeAsync()
