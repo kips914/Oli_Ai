@@ -4,7 +4,9 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
+    <OutputType>Exe</OutputType>
     <AssemblyName>OLI.Server</AssemblyName>
+    <RootNamespace>OLI.Server</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />

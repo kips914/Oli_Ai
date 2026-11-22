@@ -481,7 +481,7 @@ public sealed class ServerHost : IAsyncDisposable
             var memory = new MemoryStore(Path.Combine(_options.DataRoot, "memory", $"chat-{account.Id}.json"));
             var profile = new UserProfileStore(Path.Combine(_options.DataRoot, "profiles", $"{account.Id}.json"));
 
-            return new AgentSession(settings, _llama, _web, memory, profile, workspace,
+            return new AgentSession(settings, _llama, _web, memory, profile, workspace.Engine,
                 ownsWebSearch: false, allowCommands: false);
         });
     }

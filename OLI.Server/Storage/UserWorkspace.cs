@@ -32,6 +32,9 @@ public sealed class UserWorkspace
             allowedCommands: []);
     }
 
+    /// <summary>The sandbox engine, so the agent's file tools act inside this user's folder.</summary>
+    public WorkspaceEngine Engine => _engine;
+
     public long QuotaBytes => _engine.QuotaBytes;
     public void SetQuota(long bytes) => _engine.Configure(bytes, Math.Min(64L * 1024 * 1024, bytes), false, []);
 
