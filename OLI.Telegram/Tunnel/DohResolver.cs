@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
 using System.Text.Json;
+using OLI.Core;
 
 namespace OLI.Telegram.Tunnel;
 
@@ -121,10 +122,8 @@ public sealed class DohPinnedTunnel : HttpTunnelBase
             var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
             try
             {
-                var target = ip is null
-                    ? new DnsEndPoint(endpoint.Host, endpoint.Port)
-                    : new IPEndPoint(ip, endpoint.Port);
-                await socket.ConnectAsync(target, ct);
+                if (ip is null) await socket.ConnectAsync(endpoint, ct);
+                else await socket.ConnectAsync(new IPEndPoint(ip, endpoint.Port), ct);
                 return new NetworkStream(socket, ownsSocket: true);
             }
             catch
