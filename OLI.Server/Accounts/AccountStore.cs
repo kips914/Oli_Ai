@@ -26,6 +26,8 @@ public sealed class Account
     /// <summary>Per-user workspace allowance. 1 GB by default.</summary>
     public long QuotaBytes { get; set; } = 1024L * 1024 * 1024;
     public bool IsAdmin { get; set; }
+    /// <summary>Chosen model id ("oli-pass" | "oli-son"); empty = server default.</summary>
+    public string ModelId { get; set; } = "";
 }
 
 /// <summary>An issued bearer token. Only its SHA-256 hash is stored.</summary>
@@ -334,6 +336,20 @@ public sealed class AccountStore
             _db.Tokens.RemoveAll(t => t.AccountId == accountId);
             if (removed) await PersistAsync();
             return removed;
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task<bool> SetModelAsync(string accountId, string modelId)
+    {
+        await _gate.WaitAsync();
+        try
+        {
+            var account = _db.Accounts.FirstOrDefault(a => a.Id == accountId);
+            if (account is null) return false;
+            account.ModelId = (modelId ?? "").Trim();
+            await PersistAsync();
+            return true;
         }
         finally { _gate.Release(); }
     }

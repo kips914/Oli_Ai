@@ -15,7 +15,9 @@ using OLI.Core;
 using OLI.Engine;
 using OLI.Memory;
 using OLI.Server.Accounts;
+using OLI.Server.Chats;
 using OLI.Server.Storage;
+using OLI.Server.Usage;
 using OLI.Web;
 using OLI.Workspace;
 
@@ -42,6 +44,9 @@ public sealed class ServerHost : IAsyncDisposable
     private readonly WebSearch _web;
     private readonly MemoryStore _memory;
     private readonly UserProfileStore _profile;
+    private readonly UsageStore _usage;
+    private readonly ChatHistoryStore _chats;
+    private readonly LimitPolicy _limits;
 
     public ServerHost(ServerOptions options)
     {
@@ -56,6 +61,16 @@ public sealed class ServerHost : IAsyncDisposable
         };
         _memory = new MemoryStore(Path.Combine(_options.DataRoot, "memory", "server.json"));
         _profile = new UserProfileStore(Path.Combine(_options.DataRoot, "memory", "profile.json"));
+        _usage = new UsageStore(Path.Combine(_options.DataRoot, "usage", "tokens.json"));
+        _chats = new ChatHistoryStore(Path.Combine(_options.DataRoot, "chats"));
+        _limits = new LimitPolicy
+        {
+            SoloHourly = _options.SoloHourlyTokens,
+            SoloDaily = _options.SoloDailyTokens,
+            MinHourly = _options.MinHourlyTokens,
+            MinDaily = _options.MinDailyTokens,
+            BusyUsers = _options.BusyUsers,
+        };
     }
 
     public bool IsRunning => _app is not null;
@@ -151,8 +166,8 @@ public sealed class ServerHost : IAsyncDisposable
         {
             service = "OLI Server",
             version = AppVersion.Current,
-            api = 2,
-            model = _options.Model,
+            api = 3,
+            models = new[] { ModelInfo(_options.Model, "k3.pass", "Olim Pass"), ModelInfo(_options.LiteModel, "k3.son", "Olim Son") },
             registration = _options.AllowRegistration,
             endpoints = new[] { "/api/health", "/api/register", "/api/login", "/api/me", "/api/chat", "/api/files" },
         }));
@@ -242,22 +257,152 @@ public sealed class ServerHost : IAsyncDisposable
             if (text.Length == 0) return Results.Json(new { error = "Пустое сообщение." }, statusCode: 400);
             if (text.Length > 8000) return Results.Json(new { error = "Сообщение слишком длинное." }, statusCode: 400);
 
+            // --- dynamic token allowance
+            var active = Math.Max(1, _usage.ActiveUsers() + 1);
+            var (hourlyLimit, dailyLimit) = _limits.Allowance(active);
+            var (hourTokens, dayTokens) = _usage.For(account.Id);
+            var promptTokens = TokenEstimator.Estimate(text) + 700; // prompt + system overhead
+
+            var hourLeft = Math.Max(0, hourlyLimit - hourTokens);
+            var dayLeft = Math.Max(0, dailyLimit - dayTokens);
+            var limitLeft = Math.Min(hourLeft, dayLeft);
+            var exhausted = limitLeft <= promptTokens + 32;
+
+            // After the limit: only the light model, and a short answer budget.
+            var modelId = exhausted ? _options.LiteModel : (string.IsNullOrWhiteSpace(account.ModelId) ? _options.Model : account.ModelId);
+            if (modelId is not ("oli-pass" or "oli-son")) modelId = _options.Model;
+
             var gate = _sessionLocks.GetOrAdd(account.Id, _ => new SemaphoreSlim(1, 1));
             if (!await gate.WaitAsync(TimeSpan.FromSeconds(2), ct))
                 return Results.Json(new { error = "Предыдущий ответ ещё готовится." }, statusCode: 429);
 
             try
             {
+                // --- chat thread (the phone's "чаты" drawer)
+                var threadId = request.ThreadId;
+                ChatThread? thread = null;
+                if (!string.IsNullOrWhiteSpace(threadId)) thread = _chats.Get(account.Id, threadId);
+                if (thread is null)
+                {
+                    thread = _chats.Create(account.Id, text, modelId);
+                    threadId = thread.Id;
+                }
+                _chats.Append(account.Id, thread.Id, new StoredMessage { Role = "user", Text = text });
+
                 var session = GetSession(account);
+                session.SelectModel(modelId);
+                session.SetAnswerBudget(exhausted ? 220 : 0);
+
                 var answer = await session.SendAsync(text, progress: null, ct);
+
+                _chats.Append(account.Id, thread.Id, new StoredMessage
+                {
+                    Role = "assistant",
+                    Text = answer.Text,
+                });
+
+                var completionTokens = TokenEstimator.Estimate(answer.Text);
+                _usage.Add(new UsageEntry
+                {
+                    AccountId = account.Id,
+                    ModelId = modelId,
+                    PromptTokens = promptTokens,
+                    CompletionTokens = completionTokens,
+                });
+
+                var (hourNow, dayNow) = _usage.For(account.Id);
                 return Results.Json(new
                 {
                     text = answer.Text,
                     files = answer.FilesToSend.Select(SafeRelative).ToList(),
-                    model = _options.Model,
+                    model = modelId == _options.LiteModel ? "Olim Son" : "Olim Pass",
+                    modelId,
+                    limited = exhausted,
+                    threadId = thread!.Id,
+                    usage = new
+                    {
+                        prompt = promptTokens,
+                        completion = completionTokens,
+                        hourUsed = hourNow,
+                        hourLimit = hourlyLimit,
+                        dayUsed = dayNow,
+                        dayLimit = dailyLimit,
+                        hourLeft = Math.Max(0, hourlyLimit - hourNow),
+                        dayLeft = Math.Max(0, dailyLimit - dayNow),
+                        activeUsers = active,
+                    },
                 });
             }
             finally { gate.Release(); }
+        });
+
+        app.MapGet("/api/models", (HttpContext http) =>
+        {
+            var account = CurrentAccount(http);
+            if (account is null) return Unauthorized();
+
+            var (hourlyLimit, dailyLimit) = _limits.Allowance(Math.Max(1, _usage.ActiveUsers() + 1));
+            var (hourUsed, dayUsed) = _usage.For(account.Id);
+            var selected = string.IsNullOrWhiteSpace(account.ModelId) ? _options.Model : account.ModelId;
+
+            return Results.Json(new
+            {
+                selected,
+                models = new object[]
+                {
+                    ModelInfo(_options.Model, "k3.pass", "Olim Pass"),
+                    ModelInfo(_options.LiteModel, "k3.son", "Olim Son"),
+                },
+                limit = new
+                {
+                    hourUsed,
+                    hourLimit = hourlyLimit,
+                    dayUsed,
+                    dayLimit = dailyLimit,
+                    activeUsers = Math.Max(1, _usage.ActiveUsers() + 1),
+                    exhausted = hourUsed >= hourlyLimit || dayUsed >= dailyLimit,
+                },
+            });
+        });
+
+        app.MapPost("/api/models", async (ModelChoiceRequest request, HttpContext http) =>
+        {
+            var account = CurrentAccount(http);
+            if (account is null) return Unauthorized();
+
+            var id = (request.ModelId ?? "").Trim();
+            if (id is not ("oli-pass" or "oli-son"))
+                return Results.Json(new { error = "Неизвестная модель." }, statusCode: 400);
+
+            await _accounts.SetModelAsync(account.Id, id);
+            if (_sessions.TryGetValue(account.Id, out var session)) session.SelectModel(id);
+            return Results.Json(new { ok = true, modelId = id });
+        });
+
+        app.MapGet("/api/usage", (HttpContext http) =>
+        {
+            var account = CurrentAccount(http);
+            if (account is null) return Unauthorized();
+
+            var (hourlyLimit, dailyLimit) = _limits.Allowance(Math.Max(1, _usage.ActiveUsers() + 1));
+            var (hourUsed, dayUsed) = _usage.For(account.Id);
+            return Results.Json(new
+            {
+                hourUsed,
+                hourLimit = hourlyLimit,
+                dayUsed,
+                dayLimit = dailyLimit,
+                totalAllTime = _usage.TotalFor(account.Id),
+                activeUsers = Math.Max(1, _usage.ActiveUsers() + 1),
+                exhausted = hourUsed >= hourlyLimit || dayUsed >= dailyLimit,
+                recent = _usage.Recent(account.Id, 10).Select(e => new
+                {
+                    at = e.At,
+                    model = e.ModelId,
+                    prompt = e.PromptTokens,
+                    completion = e.CompletionTokens,
+                }),
+            });
         });
 
         app.MapPost("/api/chat/reset", (HttpContext http) =>
@@ -266,6 +411,67 @@ public sealed class ServerHost : IAsyncDisposable
             if (account is null) return Unauthorized();
             if (_sessions.TryGetValue(account.Id, out var session)) session.Reset();
             return Results.Json(new { ok = true });
+        });
+
+        // ------------------------------------------------------------ chats
+
+        app.MapGet("/api/chats", (HttpContext http) =>
+        {
+            var account = CurrentAccount(http);
+            if (account is null) return Unauthorized();
+            return Results.Json(new
+            {
+                chats = _chats.List(account.Id).Select(t => new
+                {
+                    id = t.Id,
+                    title = t.TitleOrFallback,
+                    modelId = t.ModelId,
+                    createdAt = t.CreatedAt,
+                    updatedAt = t.UpdatedAt,
+                }),
+            });
+        });
+
+        app.MapGet("/api/chats/{id}", (HttpContext http, string id) =>
+        {
+            var account = CurrentAccount(http);
+            if (account is null) return Unauthorized();
+            var thread = _chats.Get(account.Id, id);
+            if (thread is null) return Results.Json(new { error = "Чат не найден." }, statusCode: 404);
+            return Results.Json(new
+            {
+                id = thread.Id,
+                title = thread.TitleOrFallback,
+                modelId = thread.ModelId,
+                messages = thread.Messages.Select(m => new { role = m.Role, text = m.Text, at = m.At }),
+            });
+        });
+
+        app.MapPost("/api/chats", (NewChatRequest request, HttpContext http) =>
+        {
+            var account = CurrentAccount(http);
+            if (account is null) return Unauthorized();
+            var model = string.IsNullOrWhiteSpace(request.ModelId) ? _options.Model : request.ModelId;
+            var thread = _chats.Create(account.Id, request.Title, model);
+            return Results.Json(new { id = thread.Id, title = thread.TitleOrFallback });
+        });
+
+        app.MapPost("/api/chats/{id}/rename", (HttpContext http, string id, RenameChatRequest request) =>
+        {
+            var account = CurrentAccount(http);
+            if (account is null) return Unauthorized();
+            return _chats.Rename(account.Id, id, request.Title ?? "Чат")
+                ? Results.Json(new { ok = true })
+                : Results.Json(new { error = "Чат не найден." }, statusCode: 404);
+        });
+
+        app.MapDelete("/api/chats/{id}", (HttpContext http, string id) =>
+        {
+            var account = CurrentAccount(http);
+            if (account is null) return Unauthorized();
+            return _chats.Delete(account.Id, id)
+                ? Results.Json(new { ok = true })
+                : Results.Json(new { error = "Чат не найден." }, statusCode: 404);
         });
 
         // ------------------------------------------------------------ files
@@ -457,7 +663,11 @@ public sealed class ServerHost : IAsyncDisposable
         {
             if (!IsAdminRequest(http)) return Unauthorized();
             var ok = await _accounts.DeleteAsync(request.AccountId ?? "");
-            if (ok) _workspaces.Remove(request.AccountId!);
+            if (ok)
+            {
+                _workspaces.Remove(request.AccountId!);
+                _chats.DeleteAll(request.AccountId!);
+            }
             return ok ? Results.Json(new { ok = true }) : Results.Json(new { error = "Пользователь не найден." }, statusCode: 404);
         });
 
@@ -510,6 +720,16 @@ public sealed class ServerHost : IAsyncDisposable
                 ownsWebSearch: false, allowCommands: false);
         });
     }
+
+    private object ModelInfo(string model, string id, string title) => new
+    {
+        id,
+        title,
+        description = id == "oli-son"
+            ? "Лёгкая и быстрая модель OLI — когда важна скорость или лимит исчерпан."
+            : "Флагманская модель OLI — сложные задачи, код, анализ.",
+        maxTokens = id == "oli-son" ? 320 : 640,
+    };
 
     private static string SafeRelative(string path) => path.Replace('\\', '/');
 
@@ -607,7 +827,10 @@ public sealed class ServerHost : IAsyncDisposable
     public sealed record RegisterRequest(string? UserName, string? Password, string? DisplayName, string? InviteCode);
     public sealed record LoginRequest(string? UserName, string? Password);
     public sealed record ChangePasswordRequest(string? OldPassword, string? NewPassword);
-    public sealed record ChatRequestDto(string? Message);
+    public sealed record ChatRequestDto(string? Message, string? ThreadId);
+    public sealed record ModelChoiceRequest(string? ModelId);
+    public sealed record NewChatRequest(string? Title, string? ModelId);
+    public sealed record RenameChatRequest(string? Title);
     public sealed record WriteFileRequest(string? Path, string? Content, bool Append);
     public sealed record DeleteFileRequest(string? Path, bool Recursive);
     public sealed record AdminQuotaRequest(string? AccountId, long QuotaBytes);

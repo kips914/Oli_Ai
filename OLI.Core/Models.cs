@@ -58,6 +58,18 @@ public sealed class ServerSettings
     public bool WebSearchEnabled { get; set; } = true;
     public bool OpenWeb { get; set; } = true;
     public bool WorkspaceToolsEnabled { get; set; } = true;
+
+    /// <summary>Token allowance (in + out) for a user who is alone on the server.</summary>
+    public int SoloHourlyTokens { get; set; } = 150_000;
+    public int SoloDailyTokens { get; set; } = 600_000;
+    /// <summary>Floor of the allowance when the server is crowded.</summary>
+    public int MinHourlyTokens { get; set; } = 20_000;
+    public int MinDailyTokens { get; set; } = 80_000;
+    public int BusyUsers { get; set; } = 8;
+
+    /// <summary>Light model used after the token limit is exhausted (Olim Son).</summary>
+    public string LiteModel { get; set; } = "oli-son";
+
     public string Preamble { get; set; } =
         "Ты OLI — локальный ИИ-помощник. Пользователь общается с тобой через мобильное приложение. " +
         "Отвечай кратко и по делу; длинные ответы структурируй списками.";

@@ -70,6 +70,29 @@ public sealed class AgentSession : IDisposable
         get { lock (_historyLock) return _history.ToList(); }
     }
 
+    /// <summary>
+    /// Switches the model for the next answer (Olim Pass / Olim Son). The llama.cpp
+    /// server must already be serving it; otherwise the request fails and the caller
+    /// sees a clear error.
+    /// </summary>
+    public void SelectModel(string modelId)
+    {
+        var info = OLI.Core.ModelCatalog.Resolve(modelId);
+        _settings.ModelGguf = info.Gguf;
+        _settings.Model = info.Id;
+        _settings.ModelDisplayName = info.DisplayName;
+        _settings.MaxTokens = _answerBudget > 0 ? _answerBudget : info.Id == OLI.Core.ModelCatalog.LiteId ? 320 : 640;
+    }
+
+    private int _answerBudget;
+
+    /// <summary>Caps the answer length (used when the user's token limit is exhausted).</summary>
+    public void SetAnswerBudget(int maxTokens)
+    {
+        _answerBudget = Math.Max(0, maxTokens);
+        if (_answerBudget > 0) _settings.MaxTokens = _answerBudget;
+    }
+
     public void Reset()
     {
         lock (_historyLock) _history.Clear();

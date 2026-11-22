@@ -13,7 +13,10 @@ public sealed class ServerOptions
 
     /// <summary>llama.cpp server the gateway talks to.</summary>
     public string LlamaBaseUrl { get; set; } = "http://127.0.0.1:8080";
-    public string Model { get; set; } = "oli";
+    /// <summary>Full model used while the user still has tokens (k3.pass).</summary>
+    public string Model { get; set; } = "oli-pass";
+    /// <summary>Light model used after the token limit is exhausted (k3.son).</summary>
+    public string LiteModel { get; set; } = "oli-son";
     public int MaxTokens { get; set; } = 768;
     public double Temperature { get; set; } = 0.7;
     public double TopP { get; set; } = 0.95;
@@ -36,6 +39,13 @@ public sealed class ServerOptions
     /// accept accounts flagged IsAdmin or requests coming from loopback only.
     /// </summary>
     public string AdminToken { get; set; } = "";
+
+    /// <summary>Dynamic per-user token limits (tokens in + out).</summary>
+    public int SoloHourlyTokens { get; set; } = 150_000;
+    public int SoloDailyTokens { get; set; } = 600_000;
+    public int MinHourlyTokens { get; set; } = 20_000;
+    public int MinDailyTokens { get; set; } = 80_000;
+    public int BusyUsers { get; set; } = 8;
 
     public string Preamble { get; set; } =
         "Ты OLI — локальный ИИ-помощник. Пользователь общается с тобой через мобильное приложение. " +

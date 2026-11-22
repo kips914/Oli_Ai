@@ -28,6 +28,12 @@ var options = new ServerOptions
     WebSearchEnabled = settings.WebSearchEnabled,
     OpenWeb = settings.WebSearchOpenWeb,
     WorkspaceToolsEnabled = s.WorkspaceToolsEnabled,
+    LiteModel = string.IsNullOrWhiteSpace(s.LiteModel) ? "oli-son" : s.LiteModel,
+    SoloHourlyTokens = s.SoloHourlyTokens,
+    SoloDailyTokens = s.SoloDailyTokens,
+    MinHourlyTokens = s.MinHourlyTokens,
+    MinDailyTokens = s.MinDailyTokens,
+    BusyUsers = s.BusyUsers,
     Preamble = string.IsNullOrWhiteSpace(s.Preamble) ? new ServerOptions().Preamble : s.Preamble,
 };
 
