@@ -60,8 +60,25 @@ jobs:
       - name: Build debug + release APK
         working-directory: Android/OLI-Mobile
         run: |
-          gradle --no-daemon assembleDebug
-          gradle --no-daemon assembleRelease -POLI_DEFAULT_SERVER="${{ github.event.inputs.default_server }}"
+          set +e
+          gradle --no-daemon assembleDebug > ../build-debug.log 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            echo "::group::debug build log"
+            grep -E "^e: |error:|FAILURE:|What went wrong|Caused by|> Task .* FAILED|Could not" -A2 ../build-debug.log | head -80
+            echo "::endgroup::"
+            tail -40 ../build-debug.log
+            exit $rc
+          fi
+          gradle --no-daemon assembleRelease -POLI_DEFAULT_SERVER="${{ github.event.inputs.default_server }}" > ../build-release.log 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            echo "::group::release build log"
+            grep -E "^e: |error:|FAILURE:|What went wrong|Caused by|> Task .* FAILED|Could not" -A2 ../build-release.log | head -80
+            echo "::endgroup::"
+            tail -40 ../build-release.log
+            exit $rc
+          fi
 
       - name: Collect artifacts
         run: |
@@ -71,6 +88,14 @@ jobs:
           cp Android/OLI-Mobile/app/build/outputs/apk/debug/app-debug.apk "dist/OLI-Mobile-${VERSION}-debug.apk"
           find Android/OLI-Mobile/app/build/outputs/apk/release -name '*.apk' -exec cp {} "dist/OLI-Mobile-${VERSION}-release.apk" \;
           ls -lh dist
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-logs
+          path: Android/*.log
+          if-no-files-found: ignore
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
