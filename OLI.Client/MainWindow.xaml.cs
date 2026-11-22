@@ -229,14 +229,17 @@ public partial class MainWindow : Window
                 StatusText.Text = "OLI: " + e.Text;
                 break;
             case AgentEventKind.Search:
+                ResetStreaming();
                 _display.Add(new ChatMessage("system", Localization.T("searching", e.Text)));
                 ScrollToEnd();
                 break;
             case AgentEventKind.Page:
+                ResetStreaming();
                 _display.Add(new ChatMessage("system", $"📄 Читаю {Shorten(e.Text, 70)}"));
                 ScrollToEnd();
                 break;
             case AgentEventKind.Tool:
+                ResetStreaming();
                 _display.Add(new ChatMessage("system", e.Text));
                 ScrollToEnd();
                 break;
@@ -273,6 +276,17 @@ public partial class MainWindow : Window
                 ScrollToEnd();
                 break;
         }
+    }
+
+    /// <summary>
+    /// Drops the bubble of an intermediate (tool/search) generation so the next
+    /// streamed answer starts fresh instead of appending to stale text.
+    /// </summary>
+    private void ResetStreaming()
+    {
+        if (_streamingMessage is null) return;
+        if (_display.Count > 0 && ReferenceEquals(_display[^1], _streamingMessage)) _display.RemoveAt(_display.Count - 1);
+        _streamingMessage = null;
     }
 
     private void ReplaceLastMessage(string content)
@@ -364,23 +378,26 @@ public partial class MainWindow : Window
     private void OpenFullSettings_Click(object sender, RoutedEventArgs e)
     {
         PersistSettings();
+        var previousModel = _settings.ModelGguf;
         var window = new SettingsWindow(_settings) { Owner = this };
-        if (window.ShowDialog() == true)
-        {
-            _settings.MaxTokens = _settings.Mode == GenerationMode.Performance
-                ? _settings.PerformanceMaxTokens
-                : _settings.FastMaxTokens;
-            SettingsStore.Save(_settings);
-            ApplySettingsToUi();
-            ModelText.Text = _settings.ModelDisplayName;
-            ModeText.Text = _settings.Mode == GenerationMode.Performance ? "🧠 PERFORMANCE" : "⚡ FAST";
-            _session.ApplySearchSettings();
-            _workspace.Configure(_settings.WorkspaceQuotaBytes, _settings.WorkspaceMaxFileBytes,
-                _settings.AllowCommandExecution, _settings.AllowedCommands);
-            RefreshWorkspace();
+
+        if (window.ShowDialog() != true) return;
+
+        _settings.MaxTokens = _settings.Mode == GenerationMode.Performance
+            ? _settings.PerformanceMaxTokens
+            : _settings.FastMaxTokens;
+        SettingsStore.Save(_settings);
+        ApplySettingsToUi();
+        ModelText.Text = _settings.ModelDisplayName;
+        ModeText.Text = _settings.Mode == GenerationMode.Performance ? "🧠 PERFORMANCE" : "⚡ FAST";
+        _session.ApplySearchSettings();
+        _workspace.Configure(_settings.WorkspaceQuotaBytes, _settings.WorkspaceMaxFileBytes,
+            _settings.AllowCommandExecution, _settings.AllowedCommands);
+        RefreshWorkspace();
+
+        if (!string.Equals(previousModel, _settings.ModelGguf, StringComparison.OrdinalIgnoreCase))
             RestartEngine();
-            if (window.RestartRequested) RestartApplication();
-        }
+        if (window.RestartRequested) RestartApplication();
     }
 
     /// <summary>
@@ -397,7 +414,8 @@ public partial class MainWindow : Window
                 OliLog.Warning("ENGINE", "start-llama.ps1 не найден рядом с OLI.exe — движок не перезапущен");
                 return;
             }
-            Process.Start(new ProcessStartInfo("powershell.exe", $"-NoProfile -ExecutionPolicy Bypass -File \"{script}\" -Restart")
+            Process.Start(new ProcessStartInfo("powershell.exe",
+                $"-NoProfile -ExecutionPolicy Bypass -File \"{script}\" -Restart")
             {
                 UseShellExecute = true,
                 WindowStyle = ProcessWindowStyle.Hidden,
