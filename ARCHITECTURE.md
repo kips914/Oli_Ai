@@ -1,4 +1,4 @@
-# Архитектура OLI 1.8
+# Архитектура OLI 1.9
 
 Документ для тех, кто будет дорабатывать код: что где лежит, как проходит
 запрос, какие есть ограничения безопасности.
@@ -6,7 +6,7 @@
 ## Поток одного сообщения
 
 ```
-Пользователь (WPF / Telegram)
+Пользователь (WPF / Telegram / Android-приложение)
         │
         ▼
 AgentSession.SendAsync(text)
@@ -38,6 +38,8 @@ AgentSession.SendAsync(text)
 | `OLI.Memory` | память и профиль пользователя (JSON, атомарная запись) | Core |
 | `OLI.Web` | провайдеры поиска, чтение страниц, политика домена, SSRF-защита | Core |
 | `OLI.Workspace` | песочница файлов: квота, `PathGuard`, zip/unzip, команды | Core |
+| `OLI.Server` | HTTP API для телефона: аккаунты (PBKDF2), токены, квоты, чат, файлы; `ServerHost` живёт и в WPF, и в `OLI.Server.exe` | Core, Engine, Agent, Web, Memory, Workspace |
+| `Android/OLI-Mobile` | Kotlin/Compose-клиент: вход/регистрация, чат, файлы, EncryptedSharedPreferences | — (HTTP к OLI.Server) |
 | `OLI.Agent` | `AgentSession`, протокол инструментов, `ToolDispatcher`, маркеры | Core, Engine, Web, Memory, Workspace |
 | `OLI.Telegram` | бот (long polling), `TelegramApi`, туннели (relay/proxy/DoH/direct) | Core, Agent, Workspace |
 | `OLI.Client` | WPF UI, тема, настройки, связывание всего | все |
@@ -101,3 +103,29 @@ Telegram ID ограничивает доступ.
 `.github/workflows/build-exe.yml` на каждый push собирает библиотеки, гоняет
 `OLI.SelfTest`, публикует single-file `OLI.exe` и на теге `v*` прикладывает
 `OLI.exe` + `OLI-win-x64.zip` к GitHub Release.
+
+## Многопользовательский режим (1.9)
+
+```
+Android ──HTTP──► OLI.Server (Kestrel, 0.0.0.0:8765)
+Telegram ───────►      │
+WPF «Пульт админа» ────┤ (loopback)
+                       ▼
+                AccountStore  ── accounts.json (только хеши паролей и токенов)
+                UserWorkspaceRegistry ── users/<accountId>/ (по 1 ГБ)
+                AgentSession на пользователя ── llama.cpp (общая модель, общий WebSearch)
+```
+
+* **Пароли**: `PBKDF2-HMAC-SHA256`, 210 000 итераций, 16-байтовая соль на
+  пользователя, 32-байтовый хеш; сравнение `FixedTimeEquals`. Открытого пароля
+  нет нигде — админ может только задать новый (сброс) и разослать его.
+* **Токены**: 32 случайных байта, на сервере хранится SHA-256; 30 дней; не более
+  8 устройств на аккаунт; смена/сброс пароля и блокировка отзывают все токены.
+* **Файлы**: у каждого аккаунта своя `WorkspaceEngine` с `PathGuard` внутри
+  `users/<id>/`; квота — `ServerSettings.UserQuotaBytes` (по умолчанию 1 ГБ);
+  `run_command` для пользователей сервера выключен на уровне `AgentSession`.
+* **Админ-API**: `/api/admin/*` разрешён с loopback (сам ПК) или по заголовку
+  `X-OLI-Admin: <AdminToken>`, либо аккаунту с `IsAdmin`.
+* **Телефон**: логин/пароль — `EncryptedSharedPreferences` (AES-256-GCM, ключ в
+  Android Keystore), исключены из резервных копий; адрес сервера можно зашить
+  при сборке: `-POLI_DEFAULT_SERVER=http://192.168.1.10:8765`.
