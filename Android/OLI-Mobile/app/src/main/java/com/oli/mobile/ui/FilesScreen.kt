@@ -59,7 +59,6 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 @Composable
-@Composable
 fun FilesScreen(
     repo: OliRepository,
     usage: Usage?,

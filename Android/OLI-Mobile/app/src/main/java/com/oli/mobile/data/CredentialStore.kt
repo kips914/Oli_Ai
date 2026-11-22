@@ -57,7 +57,7 @@ class CredentialStore private constructor(context: Context) {
 
     var quota: Long
         get() = prefs.getLong(KEY_QUOTA, 0L)
-        private set(value) = prefs.edit().putLong(KEY_QUOTA, value).apply()
+        set(value) = prefs.edit().putLong(KEY_QUOTA, value).apply()
 
     fun saveSession(token: String, user: UserProfile, remember: Boolean, password: String?) {
         this.token = token
