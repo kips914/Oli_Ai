@@ -160,13 +160,130 @@ class OliApi private constructor() {
 
     // ---------------------------------------------------------------- chat
 
-    suspend fun chat(message: String): ChatReply {
-        val json = call("/api/chat", "POST", JSONObject().put("message", message))
+    suspend fun chat(message: String, threadId: String?): ChatReply {
+        val body = JSONObject().put("message", message)
+        if (!threadId.isNullOrBlank()) body.put("threadId", threadId)
+        val json = call("/api/chat", "POST", body)
         val files = mutableListOf<String>()
         json.optJSONArray("files")?.let { array ->
             for (i in 0 until array.length()) files.add(array.optString(i))
         }
-        return ChatReply(text = json.optString("text"), files = files)
+        json.optJSONObject("usage")?.let { u ->
+            UsageSnapshot.hourUsed = u.optLong("hourUsed")
+            UsageSnapshot.hourLimit = u.optInt("hourLimit")
+            UsageSnapshot.dayUsed = u.optLong("dayUsed")
+            UsageSnapshot.dayLimit = u.optInt("dayLimit")
+            UsageSnapshot.activeUsers = u.optInt("activeUsers", 1)
+        }
+        UsageSnapshot.limited = json.optBoolean("limited")
+        UsageSnapshot.modelName = json.optString("model")
+        UsageSnapshot.modelId = json.optString("modelId")
+        return ChatReply(
+            text = json.optString("text"),
+            files = files,
+            threadId = json.optString("threadId"),
+            limited = json.optBoolean("limited"),
+            modelName = json.optString("model")
+        )
+    }
+
+    // ---------------------------------------------------------------- models & limits
+
+    suspend fun models(): ModelState = withContext(Dispatchers.IO) {
+        val json = call("/api/models")
+        val list = mutableListOf<OliModel>()
+        json.optJSONArray("models")?.let { array ->
+            for (i in 0 until array.length()) {
+                val m = array.getJSONObject(i)
+                list.add(
+                    OliModel(
+                        id = m.optString("id"),
+                        title = m.optString("title"),
+                        description = m.optString("description"),
+                        maxTokens = m.optInt("maxTokens")
+                    )
+                )
+            }
+        }
+        val limit = json.optJSONObject("limit")
+        ModelState(
+            selected = json.optString("selected"),
+            models = list,
+            hourUsed = limit?.optLong("hourUsed") ?: 0,
+            hourLimit = limit?.optInt("hourLimit") ?: 0,
+            dayUsed = limit?.optLong("dayUsed") ?: 0,
+            dayLimit = limit?.optInt("dayLimit") ?: 0,
+            activeUsers = limit?.optInt("activeUsers") ?: 1,
+            exhausted = limit?.optBoolean("exhausted") ?: false
+        )
+    }
+
+    suspend fun chooseModel(modelId: String) {
+        call("/api/models", "POST", JSONObject().put("modelId", modelId))
+    }
+
+    /** Token usage and the current dynamic limits. */
+    suspend fun usage(): UsageSnapshotData = withContext(Dispatchers.IO) {
+        val json = call("/api/usage")
+        UsageSnapshotData(
+            hourUsed = json.optLong("hourUsed"),
+            hourLimit = json.optInt("hourLimit"),
+            dayUsed = json.optLong("dayUsed"),
+            dayLimit = json.optInt("dayLimit"),
+            totalAllTime = json.optLong("totalAllTime"),
+            activeUsers = json.optInt("activeUsers", 1),
+            exhausted = json.optBoolean("exhausted")
+        )
+    }
+
+    // ---------------------------------------------------------------- chats
+
+    suspend fun chats(): List<ChatSummary> = withContext(Dispatchers.IO) {
+        val json = call("/api/chats")
+        val array = json.optJSONArray("chats") ?: JSONArray()
+        val result = mutableListOf<ChatSummary>()
+        for (i in 0 until array.length()) {
+            val c = array.getJSONObject(i)
+            result.add(
+                ChatSummary(
+                    id = c.optString("id"),
+                    title = c.optString("title").ifBlank { "Новый чат" },
+                    modelId = c.optString("modelId"),
+                    updatedAt = c.optString("updatedAt")
+                )
+            )
+        }
+        result
+    }
+
+    suspend fun chatMessages(id: String): List<StoredChatMessage> = withContext(Dispatchers.IO) {
+        val json = call("/api/chats/" + URLEncoder.encode(id, "UTF-8"))
+        val array = json.optJSONArray("messages") ?: JSONArray()
+        val result = mutableListOf<StoredChatMessage>()
+        for (i in 0 until array.length()) {
+            val m = array.getJSONObject(i)
+            result.add(
+                StoredChatMessage(
+                    fromUser = m.optString("role") == "user",
+                    text = m.optString("text")
+                )
+            )
+        }
+        result
+    }
+
+    suspend fun newChat(title: String? = null): String {
+        val body = JSONObject()
+        if (!title.isNullOrBlank()) body.put("title", title)
+        return call("/api/chats", "POST", body).optString("id")
+    }
+
+    suspend fun renameChat(id: String, title: String) {
+        call("/api/chats/" + URLEncoder.encode(id, "UTF-8") + "/rename", "POST", JSONObject().put("title", title))
+    }
+
+    suspend fun deleteChat(id: String) {
+        call("/api/chats/" + URLEncoder.encode(id, "UTF-8"), "DELETE")
     }
 
     suspend fun resetChat() {
@@ -175,7 +292,8 @@ class OliApi private constructor() {
 
     // ---------------------------------------------------------------- files
 
-    suspend fun usage(): Usage = withContext(Dispatchers.IO) {
+    /** File-quota usage (bytes). */
+    suspend fun usageFiles(): Usage = withContext(Dispatchers.IO) {
         val json = call("/api/files/usage")
         Usage(
             used = json.optLong("used"),

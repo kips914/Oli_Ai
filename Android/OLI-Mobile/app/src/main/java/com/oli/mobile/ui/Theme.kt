@@ -13,7 +13,7 @@ import androidx.compose.ui.unit.sp
 // ---------------------------------------------------------------- palette
 // Near-black canvas, soft glass surfaces and one vivid blue accent (the OLI orb).
 
-val OliInk = Color(0xFF050507)
+val OliInk = Color(0xFF07080B)
 val OliSurface = Color(0xFF111216)
 val OliGlass = Color(0xFF1A1C21)
 val OliGlassSoft = Color(0xFF212430)
@@ -21,14 +21,16 @@ val OliOutline = Color(0xFF2B2E38)
 val OliText = Color(0xFFF1F2F5)
 val OliTextMuted = Color(0xFF9AA0AC)
 
-val OliBlue = Color(0xFF3B7DF7)
-val OliBlueBright = Color(0xFF7FB2FF)
+val OliBlue = Color(0xFF2F7BFF)
+val OliBlueBright = Color(0xFF6FE3FF)
+val OliCyan = Color(0xFF43D9C8)
+val OliViolet = Color(0xFF7B61FF)
 val OliBlueDeep = Color(0xFF14274F)
 
 private val Dark = darkColorScheme(
     primary = OliBlue,
     onPrimary = Color.White,
-    primaryContainer = Color(0xFF1B2C4E),
+    primaryContainer = Color(0xFF10233F),
     onPrimaryContainer = Color(0xFFD8E5FF),
     secondary = Color(0xFF7FD1AE),
     onSecondary = Color(0xFF07130E),

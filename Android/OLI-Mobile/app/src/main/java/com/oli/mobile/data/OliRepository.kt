@@ -29,6 +29,22 @@ class OliRepository(private val context: Context) {
     private val _files = MutableStateFlow<List<FileEntry>>(emptyList())
     val files: StateFlow<List<FileEntry>> = _files.asStateFlow()
 
+    private val _models = MutableStateFlow<ModelState?>(null)
+    val models: StateFlow<ModelState?> = _models.asStateFlow()
+
+    private val _usageLimits = MutableStateFlow<UsageSnapshotData?>(null)
+    val usageLimits: StateFlow<UsageSnapshotData?> = _usageLimits.asStateFlow()
+
+    private val _chats = MutableStateFlow<List<ChatSummary>>(emptyList())
+    val chats: StateFlow<List<ChatSummary>> = _chats.asStateFlow()
+
+    private val _activeThread = MutableStateFlow<String?>(null)
+    val activeThread: StateFlow<String?> = _activeThread.asStateFlow()
+
+    /** Called when the answer says the limit is exhausted (UI switches to Olim Son). */
+    private val _limitNotice = MutableStateFlow(false)
+    val limitNotice: StateFlow<Boolean> = _limitNotice.asStateFlow()
+
     /** True when the OLI (default) server could not be reached at startup. */
     private val _defaultServerOffline = MutableStateFlow(false)
     val defaultServerOffline: StateFlow<Boolean> = _defaultServerOffline.asStateFlow()
@@ -230,8 +246,13 @@ class OliRepository(private val context: Context) {
 
         _busy.value = true
         return try {
-            val reply = api.chat(text.trim())
+            val reply = api.chat(text.trim(), _activeThread.value)
             _messages.value = _messages.value + ChatMessage(nextId++, fromUser = false, text = reply.text, files = reply.files)
+            if (reply.threadId.isNotBlank() && _activeThread.value != reply.threadId) {
+                _activeThread.value = reply.threadId
+                refreshChats()
+            }
+            _limitNotice.value = reply.limited
             refreshUsage()
             null
         } catch (e: Exception) {
@@ -263,12 +284,110 @@ class OliRepository(private val context: Context) {
         _messages.value = emptyList()
     }
 
+    // ------------------------------------------------------------- chats & limits
+
+    suspend fun refreshChats() {
+        if (isDemo) return
+        try {
+            _chats.value = api.chats()
+        } catch (_: Exception) {
+        }
+    }
+
+    /** Opens a saved conversation (or starts a fresh one when [threadId] is null). */
+    suspend fun openChat(threadId: String?) {
+        _activeThread.value = threadId
+        if (isDemo || threadId.isNullOrBlank()) {
+            _messages.value = emptyList()
+            return
+        }
+        _messages.value = try {
+            api.chatMessages(threadId).map { ChatMessage(nextId++, fromUser = it.fromUser, text = it.text) }
+        } catch (e: Exception) {
+            listOf(ChatMessage(nextId++, fromUser = false, text = "⚠ Не удалось открыть чат: ${e.message}"))
+        }
+    }
+
+    suspend fun newChat(): String? {
+        _activeThread.value = null
+        _messages.value = emptyList()
+        if (isDemo) return null
+        return try {
+            val id = api.newChat()
+            _activeThread.value = id
+            refreshChats()
+            id
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    suspend fun renameChat(id: String, title: String): Boolean = try {
+        api.renameChat(id, title)
+        refreshChats()
+        true
+    } catch (_: Exception) {
+        false
+    }
+
+    suspend fun deleteChat(id: String): Boolean = try {
+        api.deleteChat(id)
+        if (_activeThread.value == id) {
+            _activeThread.value = null
+            _messages.value = emptyList()
+        }
+        refreshChats()
+        true
+    } catch (_: Exception) {
+        false
+    }
+
+    suspend fun refreshModels() {
+        if (isDemo) {
+            _models.value = ModelState(
+                selected = "oli-pass",
+                models = listOf(
+                    OliModel("oli-pass", "Olim Pass", "Флагман OLI: сложные задачи, код, анализ.", 640),
+                    OliModel("oli-son", "Olim Son", "Лёгкая и быстрая модель OLI.", 320)
+                ),
+                hourUsed = 12_400, hourLimit = 150_000,
+                dayUsed = 48_200, dayLimit = 600_000,
+                activeUsers = 1, exhausted = false
+            )
+            _usageLimits.value = UsageSnapshotData(12_400, 150_000, 48_200, 600_000, 120_000, 1, false)
+            return
+        }
+        try {
+            val state = api.models()
+            _models.value = state
+            _usageLimits.value = api.usage()
+        } catch (_: Exception) {
+        }
+    }
+
+    suspend fun chooseModel(modelId: String): Boolean = try {
+        if (isDemo) {
+            _models.value = _models.value?.copy(selected = modelId)
+            true
+        } else {
+            api.chooseModel(modelId)
+            refreshModels()
+            true
+        }
+    } catch (_: Exception) {
+        false
+    }
+
+    fun dismissLimitNotice() {
+        _limitNotice.value = false
+    }
+
     // ------------------------------------------------------------- files
 
     suspend fun refreshUsage() {
         if (isDemo) return
         try {
-            _usage.value = api.usage()
+            _usage.value = api.usageFiles()
         } catch (_: Exception) {
         }
     }

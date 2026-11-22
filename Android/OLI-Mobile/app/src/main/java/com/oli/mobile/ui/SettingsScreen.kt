@@ -1,6 +1,7 @@
 package com.oli.mobile.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,6 +11,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -47,7 +50,8 @@ fun SettingsScreen(
     usagePercent: Double,
     demo: Boolean,
     onSignedOut: () -> Unit,
-    onExitDemo: () -> Unit
+    onExitDemo: () -> Unit,
+    onBack: () -> Unit = {}
 ) {
     var ownServer by remember { mutableStateOf(repo.usingOwnServer) }
     var serverField by remember { mutableStateOf(repo.customServer) }
@@ -65,9 +69,33 @@ fun SettingsScreen(
             .fillMaxSize()
             .background(OliInk)
             .statusBarsPadding()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp)
     ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                Modifier
+                    .size(40.dp)
+                    .clickable(onClick = onBack),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("‹", style = MaterialTheme.typography.headlineSmall, color = OliText)
+            }
+            Spacer(Modifier.width(4.dp))
+            OliMark(size = 26.dp)
+            Spacer(Modifier.width(10.dp))
+            Column {
+                Text("Настройки", style = MaterialTheme.typography.titleMedium, color = OliText)
+                Text("OLI Mobile", style = MaterialTheme.typography.labelSmall, color = OliTextMuted)
+            }
+        }
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp)
+        ) {
         if (demo) {
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
@@ -275,6 +303,9 @@ fun SettingsScreen(
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+    }
+
+        }
     }
 
     if (confirmLogout) {
