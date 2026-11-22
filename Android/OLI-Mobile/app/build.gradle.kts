@@ -12,8 +12,8 @@ android {
         applicationId = "com.oli.mobile"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.9.0"
 
         // Optional default server baked into the build (Settings screen still overrides it):
         //   ./gradlew assembleRelease -POLI_DEFAULT_SERVER=http://192.168.1.10:8765
