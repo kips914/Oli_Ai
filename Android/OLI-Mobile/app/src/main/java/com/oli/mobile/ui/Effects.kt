@@ -1,6 +1,9 @@
 package com.oli.mobile.ui
 
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -12,14 +15,20 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.draw.scale
-import androidx.compose.foundation.interaction.interactionSource
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -253,18 +262,23 @@ fun RippleEmitter(trigger: Int, color: Color = OliBlueBright, modifier: Modifier
  */
 @Composable
 fun Modifier.pressableScale(pressedScale: Float = 0.96f): Modifier {
-    val source = androidx.compose.runtime.remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
-    val pressed by androidx.compose.foundation.interaction.collectIsPressedAsState(source)
-    val target = if (pressed) pressedScale else 1f
-    val scale by androidx.compose.animation.core.animateFloatAsState(
-        targetValue = target,
-        animationSpec = androidx.compose.animation.core.spring(
+    val pressed = remember { mutableStateOf(false) }
+    val scale = animateFloatAsState(
+        targetValue = if (pressed.value) pressedScale else 1f,
+        animationSpec = spring(
             dampingRatio = 0.55f,
-            stiffness = androidx.compose.animation.core.Spring.StiffnessHigh
+            stiffness = Spring.StiffnessHigh
         ),
         label = "pressScale"
     )
     return this
-        .then(Modifier.interactionSource(source))
-        .then(Modifier.scale(scale))
+        .pointerInput(Unit) {
+            awaitEachGesture {
+                awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                pressed.value = true
+                waitForUpOrCancellation(pass = PointerEventPass.Initial)
+                pressed.value = false
+            }
+        }
+        .then(Modifier.graphicsLayer { scaleX = scale.value; scaleY = scale.value })
 }

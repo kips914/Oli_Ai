@@ -48,6 +48,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
@@ -129,7 +130,7 @@ fun ModelSheet(
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .offset { IntOffset(0, (drag.value * sheetHeightPx).roundToInt()) }
-                .onSizeChangedCompat { sheetHeightPx = it.toFloat().coerceAtLeast(1f) }
+                .onSizeChanged { sheetHeightPx = it.height.toFloat().coerceAtLeast(1f) }
                 .clip(RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
                 .background(OliSurface)
                 .border(
@@ -400,12 +401,3 @@ private fun LimitRow(label: String, used: Long, limit: Long) {
     }
 }
 
-/** onSizeChanged without pulling in the whole layout import list. */
-private fun Modifier.onSizeChangedCompat(block: (Int) -> Unit): Modifier =
-    this.then(
-        androidx.compose.ui.layout.layout { measurable, constraints ->
-            val placeable = measurable.measure(constraints)
-            block(placeable.height)
-            layout(placeable.width, placeable.height) { placeable.place(0, 0) }
-        }
-    )

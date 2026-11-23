@@ -3,6 +3,11 @@ package com.oli.mobile.ui
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -42,6 +47,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.matchParentSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
@@ -690,16 +696,15 @@ private fun VoiceButton(onText: (String) -> Unit, enabled: Boolean) {
         }
     }
 
-    val pulse by androidx.compose.animation.core.rememberInfiniteTransition(label = "mic")
-        .animateFloat(
-            initialValue = 0.4f,
-            targetValue = 1f,
-            animationSpec = androidx.compose.animation.core.infiniteRepeatable(
-                androidx.compose.animation.core.tween(700, easing = androidx.compose.animation.core.LinearEasing),
-                androidx.compose.animation.core.RepeatMode.Reverse
-            ),
-            label = "micPulse"
-        )
+    val pulse by rememberInfiniteTransition(label = "mic").animateFloat(
+        initialValue = 0.4f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            tween(700, easing = LinearEasing),
+            RepeatMode.Reverse
+        ),
+        label = "micPulse"
+    )
 
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
