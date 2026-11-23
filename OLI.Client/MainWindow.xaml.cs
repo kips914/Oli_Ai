@@ -794,8 +794,9 @@ public partial class MainWindow : Window
         }
 
         MessageBox.Show(this,
-            $"Не удалось открыть порт {port}: {error}.\n\n" + FirewallHelper.Hint(port),
-            "Брандмауэр Windows", MessageBoxButton.OK, MessageBoxImage.Information);
+            $"Не удалось открыть порт {port}: {error}.\n\n" + FirewallHelper.Hint(port) +
+            $"\n\nОткройте PowerShell от имени администратора и выполните:\n{FirewallHelper.ManualCommand(port)}",
+            "Брандмауэр Windows", MessageBoxButton.OK, MessageBoxImage.Warning);
     }
     private void ServerStop_Click(object sender, RoutedEventArgs e) => _ = StopServerAsync();
 
@@ -815,7 +816,11 @@ public partial class MainWindow : Window
             {
                 var firewall = await Task.Run(() => FirewallHelper.EnsurePortOpen(port));
                 if (firewall is null) OliLog.Info("SERVER", $"Порт {port} открыт в брандмауэре.");
-                else OliLog.Warning("SERVER", $"Брандмауэр: {firewall}");
+                else
+                    OliLog.Warning("SERVER",
+                        $"Брандмауэр: {firewall}. Телефон по Wi-Fi не подключится, пока порт закрыт. " +
+                        $"Решение: OLI → «Пульт админа» → «🛡 Открыть порт», или PowerShell от администратора: " +
+                        FirewallHelper.ManualCommand(port));
             }
 
             RefreshServerUi();
@@ -869,7 +874,11 @@ public partial class MainWindow : Window
         if (ServerStatusLine is null) return;
         var running = _serverHost?.IsRunning == true;
         ServerStatusLine.Text = running
-            ? $"🟢 Сервер работает на порту {_settings.Server.Port} · пользователей: {_serverHost!.RegisteredUsers}"
+            ? $"🟢 Сервер работает на порту {_settings.Server.Port} · пользователей: {_serverHost!.RegisteredUsers}" +
+              (FirewallHelper.RuleExists(_settings.Server.Port)
+                  ? " · порт открыт в брандмауэре"
+                  : $" · ⚠ порт {_settings.Server.Port} закрыт брандмауэром: нажмите «🛡 Открыть порт» " +
+                    "(или подключитесь через «Пульт админа» → интернет-доступ)")
             : "◻ Сервер остановлен — телефон не сможет подключиться.";
         ServerStartButton.IsEnabled = !running;
         ServerStopButton.IsEnabled = running;

@@ -105,7 +105,7 @@ fun AuthScreen(repo: OliRepository, defaultServerOffline: Boolean, onDemo: () ->
             showServerField = true
             ownServer = repo.usingOwnServer
             error = if (repo.usingOwnServer)
-                "Компьютер не отвечает. Если вы не дома (мобильный интернет), вставьте код подключения ниже."
+                "Компьютер не отвечает. На ПК: «Пульт админа» → «🛡 Открыть порт». Если вы не в домашнем Wi-Fi — «🌍 Дам доступ из интернета» и код ниже."
             else
                 "Сервер OLI сейчас недоступен. Можно посмотреть интерфейс без входа или подключить свой ПК."
         }

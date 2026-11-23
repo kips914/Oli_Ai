@@ -145,8 +145,9 @@ class OliApi private constructor() {
         val hint = when {
             raw.contains("failed to connect") || raw.contains("connection refused") ||
                 raw.contains("econnrefused") || raw.contains("timeout") || raw.contains("timed out") ->
-                "Компьютер не ответил. Проверьте: OLI запущен на ПК, сервер в OLI включён, телефон и ПК в одной Wi-Fi-сети — " +
-                    "или включите на ПК интернет-доступ и вставьте код подключения."
+                "Компьютер не ответил. Чаще всего это брандмауэр Windows: на ПК откройте «Пульт админа» → " +
+                    "«🛡 Открыть порт» (или нажмите «🌍 Дам доступ из интернета» — работает и на мобильном интернете). " +
+                    "Если вы не дома — вставьте код подключения."
             raw.contains("unknownhost") || raw.contains("unable to resolve") || raw.contains("nodename") ->
                 "Адрес не найден. Ссылка на туннель живёт только пока OLI на ПК открыт — скопируйте свежий код подключения."
             raw.contains("cleartext") ->

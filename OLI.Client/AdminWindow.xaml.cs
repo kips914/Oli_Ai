@@ -60,9 +60,22 @@ public partial class AdminWindow : Window
         StartServerButton.IsEnabled = !running;
         StopServerButton.IsEnabled = running;
 
+        var port = _host.Options.Port;
+        var portOpen = FirewallHelper.RuleExists(port);
+        var all = OLI.Core.NetworkAddresses.LocalDetailed()
+            .Where(a => a.IsWifiOrEthernet)
+            .Select(a => a.Address)
+            .Where(a => !string.IsNullOrWhiteSpace(a))
+            .Distinct()
+            .ToList();
+        var addresses = all.Count > 0 ? string.Join("  ·  ", all.Select(a => $"http://{a}:{port}")) : "—";
+
         ServerAddressText.Text = running
-            ? $"Адрес для телефона: http://{OLI.Core.NetworkAddresses.Preferred() ?? "—"}:{_host.Options.Port}"
-            : $"Порт {_host.Options.Port}. Адрес для телефона появится после запуска сервера.";
+            ? $"Порт {port} · адрес для телефона по Wi-Fi: {addresses}" +
+              (portOpen
+                  ? "  · брандмауэр: порт открыт"
+                  : $"  · ⚠ брандмауэр: порт {port} ЗАКРЫТ — телефон по Wi-Fi не увидит сервер, нажмите «🛡 Открыть порт»")
+            : $"Порт {port}. Адрес для телефона появится после запуска сервера.";
 
         if (running && string.IsNullOrWhiteSpace(ServerDetailsText.Text))
             ServerDetailsText.Text = $"API: {_host.BaseUrl} · пользователей: {_host.RegisteredUsers}";
@@ -112,6 +125,9 @@ public partial class AdminWindow : Window
         }
 
         TunnelStartButton.IsEnabled = false;
+        if (!FirewallHelper.RuleExists(_host.Options.Port))
+            TunnelLogText.Text = "Порт закрыт брандмауэром — туннель всё равно сработает, но по Wi-Fi телефон не подключится.";
+
         var ok = await _tunnel.StartAsync(_tunnelSettings, _host.Options.Port);
         RefreshTunnelState();
         TunnelStartButton.IsEnabled = !_tunnel.IsRunning;

@@ -95,18 +95,26 @@ public sealed class LlamaClient : IDisposable
 
             await using var stream = await response.Content.ReadAsStreamAsync(ct);
             using var reader = new StreamReader(stream, Encoding.UTF8);
+            var rawLines = 0;
 
             while (!reader.EndOfStream)
             {
                 ct.ThrowIfCancellationRequested();
                 var line = await reader.ReadLineAsync(ct);
-                if (string.IsNullOrWhiteSpace(line) || !line.StartsWith("data:", StringComparison.Ordinal)) continue;
-                var payload = line[5..].Trim();
-                if (payload == "[DONE]") break;
+                if (string.IsNullOrWhiteSpace(line)) continue;
+
+                // llama.cpp and Ollama send "data: {json}" (SSE); a few backends send bare
+                // NDJSON lines. Accept both instead of silently dropping everything.
+                var payload = line.Trim();
+                if (payload.StartsWith("data:", StringComparison.Ordinal)) payload = payload[5..].Trim();
+                if (payload.Length == 0 || payload == "[DONE]" || payload.StartsWith(":", StringComparison.Ordinal)) continue;
+                rawLines++;
 
                 try
                 {
                     using var doc = JsonDocument.Parse(payload);
+                    if (doc.RootElement.TryGetProperty("error", out var streamError))
+                        throw new HttpRequestException(Explain(System.Net.HttpStatusCode.OK, streamError.ToString(), model));
                     if (!doc.RootElement.TryGetProperty("choices", out var choices) || choices.GetArrayLength() == 0)
                         continue;
                     // llama.cpp streams "delta", some backends (and non-stream fallbacks) use "message".
@@ -114,7 +122,7 @@ public sealed class LlamaClient : IDisposable
                         ? c.GetString()
                         : choices[0].TryGetProperty("message", out var m) && m.TryGetProperty("content", out var mc)
                             ? mc.GetString()
-                            : null;
+                            : choices[0].TryGetProperty("text", out var txt) ? txt.GetString() : null;
                     if (!string.IsNullOrEmpty(delta))
                     {
                         sb.Append(delta);
@@ -123,6 +131,12 @@ public sealed class LlamaClient : IDisposable
                 }
                 catch (JsonException) { /* keep-alive or partial chunk */ }
             }
+
+            // Nothing parseable came back: do not pretend the answer was empty.
+            if (sb.Length == 0 && rawLines > 0)
+                throw new HttpRequestException(
+                    $"Движок {BaseUrl} прислал {rawLines} строк потокового ответа, но ни одной с текстом. " +
+                    "Попробуйте другую модель или обновите Ollama/llama.cpp.");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

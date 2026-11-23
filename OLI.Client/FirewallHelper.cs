@@ -11,6 +11,7 @@ namespace OLI.Client;
 public static class FirewallHelper
 {
     private const string RuleName = "OLI Server (phone app)";
+    private const string LegacyRuleName = "OLI Server (phone app) 8765";
 
     /// <summary>Set once the rule was confirmed, so a restart does not re-add it.</summary>
     private static bool _seenOpen;
@@ -41,70 +42,90 @@ public static class FirewallHelper
 
     public static bool RuleExists(int port)
     {
-        var (code, output) = RunNetsh($"advfirewall firewall show rule name=\"{RuleName}\"");
-        return code == 0 && output.Contains(port.ToString(), StringComparison.Ordinal);
+        // Both names are checked: the current one and the one used by older builds, so an
+        // existing rule is never duplicated and an old port-8765 rule is not trusted.
+        foreach (var name in new[] { RuleName, LegacyRuleName })
+        {
+            var (code, output) = RunNetsh($"advfirewall firewall show rule name=\"{name}\"");
+            if (code != 0) continue;
+            var localPorts = output.Split('\n')
+                .Select(line => line.Trim())
+                .FirstOrDefault(line => line.StartsWith("Локальный порт", StringComparison.OrdinalIgnoreCase) ||
+                                        line.StartsWith("LocalPort", StringComparison.OrdinalIgnoreCase));
+            if (localPorts is not null && localPorts.Contains(port.ToString(), StringComparison.Ordinal))
+                return true;
+        }
+        return false;
     }
 
     /// <summary>
     /// Adds (or refreshes) the inbound rule. Returns null on success, otherwise a
-    /// human-readable reason. Shows a UAC prompt when needed.
+    /// human-readable reason. Asks for elevation (UAC) when the app is not admin —
+    /// without that Windows silently refuses and the phone sees "сервер не отвечает".
     /// </summary>
     public static string? EnsurePortOpen(int port, bool elevated = true)
     {
-        // Delete + add in one go, so a stale rule (old profile/port) is replaced instead
-        // of silencing the phone. A rule that already allows the port is fine too.
-        var alreadyOpen = RuleExists(port);
-        if (alreadyOpen && !_seenOpen) { _seenOpen = true; return null; }
+        if (RuleExists(port)) { _seenOpen = true; return null; }
 
         var arguments =
             $"advfirewall firewall delete rule name=\"{RuleName}\" & " +
             $"advfirewall firewall add rule name=\"{RuleName}\" dir=in action=allow protocol=TCP localport={port} " +
-            "profile=any";
+            "profile=any & " +
+            // The app itself is allowed too: some third-party firewalls filter by program.
+            $"advfirewall firewall add rule name=\"{RuleName} (app)\" dir=in action=allow program=\"{Environment.ProcessPath}\" " +
+            "enable=yes profile=any";
 
-        // Firewall rules need admin rights. Try silently first: if the app already runs
-        // elevated this works with no UAC prompt at all; otherwise we ask for elevation.
-        var candidate = new ProcessStartInfo("cmd.exe", $"/c netsh {arguments}")
-        {
-            UseShellExecute = true,
-            CreateNoWindow = true,
-            WindowStyle = ProcessWindowStyle.Hidden,
-        };
-        if (!elevated) candidate.Verb = "";
-
+        // 1. Try silently — works when OLI already runs elevated (no prompt at all).
         try
         {
-            if (elevated)
+            using var quiet = Process.Start(new ProcessStartInfo("cmd.exe", $"/c netsh {arguments}")
             {
-                using (var quiet = Process.Start(new ProcessStartInfo("cmd.exe", $"/c netsh {arguments}")
-                       {
-                           UseShellExecute = false,
-                           CreateNoWindow = true,
-                           RedirectStandardOutput = true,
-                           RedirectStandardError = true,
-                       }))
-                {
-                    quiet?.WaitForExit(15_000);
-                }
-                if (RuleExists(port)) return null;
-            }
-
-            using var process = Process.Start(candidate);
-            if (process is null) return "не удалось запустить netsh";
-            process.WaitForExit(30_000);
-
-            if (RuleExists(port)) return null;
-            return "правило не добавлено (возможно, отказ в правах администратора)";
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            });
+            quiet?.WaitForExit(15_000);
         }
-        catch (System.ComponentModel.Win32Exception)
+        catch { /* fall through to elevation */ }
+        if (RuleExists(port)) { _seenOpen = true; return null; }
+        if (!elevated) return "правило не добавлено: нужны права администратора";
+
+        // 2. Ask Windows for elevation. This is the step that was missing before.
+        try
         {
-            return "отменено запрос прав администратора";
+            var psi = new ProcessStartInfo("cmd.exe", $"/c netsh {arguments}")
+            {
+                UseShellExecute = true,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden,
+                Verb = "runas",
+            };
+            using var elevatedProcess = Process.Start(psi);
+            if (elevatedProcess is null) return "не удалось запросить права администратора";
+            elevatedProcess.WaitForExit(60_000);
+        }
+        catch (System.ComponentModel.Win32Exception ex)
+        {
+            // 1223 = the user pressed "No" on the UAC prompt.
+            return ex.NativeErrorCode == 1223
+                ? "запрос прав администратора отклонён — порт остался закрытым"
+                : $"не удалось открыть порт: {ex.Message}";
         }
         catch (Exception ex)
         {
             OliLog.Warning("SERVER", $"Брандмауэр: {ex.Message}");
             return ex.Message;
         }
+
+        if (RuleExists(port)) { _seenOpen = true; return null; }
+        return $"правило для порта {port} не появилось. Откройте PowerShell от администратора и выполните: " +
+               $"netsh advfirewall firewall add rule name=\"{RuleName}\" dir=in action=allow protocol=TCP localport={port} profile=any";
     }
+
+    /// <summary>Command the user can paste into an elevated PowerShell / cmd.</summary>
+    public static string ManualCommand(int port) =>
+        $"netsh advfirewall firewall add rule name=\"{RuleName}\" dir=in action=allow protocol=TCP localport={port} profile=any";
 
     /// <summary>Firewall/profile hint shown next to the server address.</summary>
     public static string Hint(int port) =>
