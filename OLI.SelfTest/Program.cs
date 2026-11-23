@@ -336,7 +336,7 @@ Check("join code survives whitespace pasted from a messenger", () =>
     return ConnectionCore.ParseJoinCode(messy)?.Address == "http://192.168.1.10:6767";
 });
 Check("join code tolerates the oli:// prefix",
-    () => ConnectionCore.ParseJoinCode("oli://" + ConnectionCore.BuildJoinCode("http://a:1")).FromCode);
+    () => ConnectionCore.ParseJoinCode("oli://" + ConnectionCore.BuildJoinCode("http://a:1"))?.FromCode == true);
 Check("plain address is accepted instead of a code",
     () => ConnectionCore.ParseJoinCode("192.168.1.10:6767") == new JoinCodeInfo("http://192.168.1.10:6767", "", false));
 Check("plain https address is accepted",
@@ -541,14 +541,34 @@ await using (var live = new OLI.Server.ServerHost(new OLI.Server.ServerOptions
     Check("the failed turn still created (and titled) a thread", () =>
         threads.Count == 1 && threads[0].Title.StartsWith("Как дела"));
 
-    var loaded = await client.LoadChatAsync(threads[0].Id);
+    var loaded = threads.Count > 0 ? await client.LoadChatAsync(threads[0].Id) : [];
     Check("the user's message is stored once", () => loaded.Count(m => m.Role == ChatRole.User) == 1);
     Check("no empty assistant bubble is stored", () => loaded.All(m => m.Role != ChatRole.Assistant || m.Text.Length > 0));
 
     var unauthorised = new OLI.Engine.OliServerClient($"http://127.0.0.1:{livePort}");
-    Check("chat without a token is refused", () => !(await unauthorised.SendAsync("hi", null, default)).Ok);
-    Check("chats list without a token is empty, not an exception",
-        () => unauthorised.ListChatsAsync().GetAwaiter().GetResult().Count == 0);
+    var refusedChat = await unauthorised.SendAsync("hi", null, default);
+    Check("chat without a token is refused", () => !refusedChat.Ok);
+    var refusedList = await unauthorised.ListChatsAsync();
+    Check("chats list without a token is empty, not an exception", () => refusedList.Count == 0);
+
+    var firstId = threads.Count > 0 ? threads[0].Id : "";
+    var renamed = await client.RenameAsync(firstId, "Новое имя");
+    Check("rename over HTTP works", () => renamed);
+
+    if (renamed)
+    {
+        var afterRename = await client.ListChatsAsync();
+        Check("the new title is visible in the drawer",
+            () => afterRename.Any(t => t.Id == firstId && t.Title == "Новое имя"));
+    }
+
+    var freshId = await client.NewChatAsync("Пустой чат");
+    Check("a new empty thread can be created", () => !string.IsNullOrWhiteSpace(freshId));
+    await CheckAsync("latest chat points at the newest thread", async () => await client.LatestChatAsync() == freshId);
+
+    var deleteSucceeded = await client.DeleteChatAsync(freshId ?? "");
+    Check("delete over HTTP works", () => deleteSucceeded);
+    await CheckAsync("latest chat falls back after delete", async () => await client.LatestChatAsync() != freshId);
 }
 
 try { Directory.Delete(liveRoot, true); } catch { }

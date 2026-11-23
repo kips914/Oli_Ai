@@ -289,6 +289,71 @@ public sealed class OliServerClient : IDisposable
         return result;
     }
 
+    /// <summary>Renames a thread ("как назвать чат" in the drawer).</summary>
+    public async Task<bool> RenameAsync(string threadId, string title, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(threadId)) return false;
+        return await SendNoContentAsync(HttpMethod.Post, "/api/chats/" + Uri.EscapeDataString(threadId) + "/rename",
+            JsonSerializer.Serialize(new { title }), ct);
+    }
+
+    public async Task<bool> DeleteChatAsync(string threadId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(threadId)) return false;
+        return await SendNoContentAsync(HttpMethod.Delete, "/api/chats/" + Uri.EscapeDataString(threadId), null, ct);
+    }
+
+    /// <summary>Creates an empty thread (the "+" button) and returns its id.</summary>
+    public async Task<string?> NewChatAsync(string? title = null, CancellationToken ct = default)
+    {
+        if (BaseUrl.Length == 0) return null;
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, BaseUrl + "/api/chats")
+            {
+                Content = new StringContent(JsonSerializer.Serialize(new { title }), Encoding.UTF8, "application/json"),
+            };
+            if (!string.IsNullOrWhiteSpace(Token))
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token);
+            using var response = await _http.SendAsync(request, ct);
+            if (!response.IsSuccessStatusCode) return null;
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+            var id = Str(doc.RootElement, "id");
+            return id.Length > 0 ? id : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The thread the app should open on start (last conversation).</summary>
+    public async Task<string?> LatestChatAsync(CancellationToken ct = default)
+    {
+        var json = await GetJsonAsync("/api/chats/latest", ct);
+        if (json is null) return null;
+        var id = Str(json.Value, "threadId");
+        return id.Length > 0 ? id : null;
+    }
+
+    private async Task<bool> SendNoContentAsync(HttpMethod method, string path, string? json, CancellationToken ct)
+    {
+        if (BaseUrl.Length == 0) return false;
+        try
+        {
+            using var request = new HttpRequestMessage(method, BaseUrl + path);
+            if (json is not null) request.Content = new StringContent(json, Encoding.UTF8, "application/json");
+            if (!string.IsNullOrWhiteSpace(Token))
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token);
+            using var response = await _http.SendAsync(request, ct);
+            return response.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private async Task<JsonElement?> GetJsonAsync(string path, CancellationToken ct)
     {
         if (BaseUrl.Length == 0) return null;
