@@ -18,16 +18,31 @@ public partial class AdminWindow : Window
 {
     private readonly ServerHost _host;
     private readonly HttpClient _http;
+    private readonly TunnelSettings _tunnelSettings;
+    private readonly TunnelManager _tunnel = new();
     private List<AdminUser> _users = [];
 
-    public AdminWindow(ServerHost host)
+    public AdminWindow(ServerHost host, TunnelSettings? tunnelSettings = null)
     {
         InitializeComponent();
         _host = host;
+        _tunnelSettings = tunnelSettings ?? new TunnelSettings();
         _http = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{host.Options.Port}"), Timeout = TimeSpan.FromSeconds(15) };
         _host.StatusChanged += OnServerStatusChanged;
-        Loaded += async (_, _) => { RefreshServerState(); await LoadUsersAsync(); };
-        Closed += (_, _) => _host.StatusChanged -= OnServerStatusChanged;
+        _tunnel.Changed += OnTunnelChanged;
+        Loaded += async (_, _) =>
+        {
+            RefreshServerState();
+            RefreshTunnelState();
+            await LoadUsersAsync();
+            if (_tunnelSettings.Enabled && _host.IsRunning) await StartTunnelAsync();
+        };
+        Closed += (_, _) =>
+        {
+            _host.StatusChanged -= OnServerStatusChanged;
+            _tunnel.Changed -= OnTunnelChanged;
+            _tunnel.Dispose();
+        };
     }
 
     private void OnServerStatusChanged(string status) => Dispatcher.Invoke(() =>
@@ -85,6 +100,106 @@ public partial class AdminWindow : Window
     }
 
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await LoadUsersAsync();
+
+    // ------------------------------------------------------------- tunnel
+
+    private async Task StartTunnelAsync()
+    {
+        if (!_host.IsRunning)
+        {
+            TunnelStatusText.Text = "Интернет-доступ: сначала запустите сервер.";
+            return;
+        }
+
+        TunnelStartButton.IsEnabled = false;
+        var ok = await _tunnel.StartAsync(_tunnelSettings, _host.Options.Port);
+        RefreshTunnelState();
+        TunnelStartButton.IsEnabled = !_tunnel.IsRunning;
+        if (ok)
+        {
+            _tunnelSettings.Enabled = true;
+            _tunnelSettings.LastPublicUrl = _tunnel.PublicUrl;
+            AdminMessageText.Text = "Телефону нужен только код подключения ниже — адрес вводить не нужно.";
+        }
+        else
+        {
+            AdminMessageText.Text = "⚠ " + (_tunnel.LastError.Length > 0 ? _tunnel.LastError : "Туннель не запустился.");
+            TunnelLogText.Visibility = Visibility.Visible;
+        }
+    }
+
+    private void OnTunnelChanged() => Dispatcher.Invoke(RefreshTunnelState);
+
+    private void RefreshTunnelState()
+    {
+        if (TunnelDot is null) return;
+        var running = _tunnel.IsRunning && _tunnel.PublicUrl.Length > 0;
+        TunnelDot.Fill = (System.Windows.Media.Brush)Application.Current.Resources[running ? "OnlineBrush" : "OfflineBrush"];
+        TunnelStatusText.Text = running ? "Интернет-доступ: работает" : "Интернет-доступ: выключен";
+        TunnelAddressText.Text = running
+            ? _tunnel.PublicUrl + "  ·  этот адрес меняется при каждом запуске, поэтому используйте код подключения"
+            : _tunnel.StatusLine;
+
+        var url = running ? _tunnel.PublicUrl : _tunnelSettings.LastPublicUrl;
+        TunnelPairText.Text = string.IsNullOrWhiteSpace(url)
+            ? ""
+            : "Код подключения для телефона (в приложении: Настройки → «Вставить код»):\n" + BuildPairCode(url);
+
+        if (TunnelLogText.Visibility == Visibility.Visible)
+        {
+            var lines = _tunnel.Log.TakeLast(3).ToList();
+            TunnelLogText.Text = lines.Count == 0 ? "Журнал пуст." : string.Join(Environment.NewLine, lines);
+        }
+
+        TunnelStopButton.IsEnabled = _tunnel.IsRunning;
+        TunnelStartButton.IsEnabled = !_tunnel.IsRunning;
+    }
+
+    private string BuildPairCode(string url) =>
+        TunnelManager.BuildPairCode(url, _host.Options.InviteCode);
+
+    private async void TunnelStart_Click(object sender, RoutedEventArgs e)
+    {
+        AdminMessageText.Text = "Запускаю туннель (первый запуск cloudflared может занять 10–20 секунд)…";
+        await StartTunnelAsync();
+    }
+
+    private async void TunnelStop_Click(object sender, RoutedEventArgs e)
+    {
+        await _tunnel.StopAsync();
+        _tunnelSettings.Enabled = false;
+        TunnelPairText.Text = "";
+        RefreshTunnelState();
+        AdminMessageText.Text = "Интернет-доступ выключен: телефон снова подключается только по Wi-Fi.";
+    }
+
+    private void TunnelLog_Click(object sender, RoutedEventArgs e)
+    {
+        var showing = TunnelLogText.Visibility != Visibility.Visible;
+        TunnelLogText.Visibility = showing ? Visibility.Visible : Visibility.Collapsed;
+        TunnelLogButton.Content = showing ? "Скрыть журнал" : "Журнал";
+        RefreshTunnelState();
+    }
+
+    private void TunnelCopy_Click(object sender, RoutedEventArgs e)
+    {
+        var url = _tunnel.IsRunning ? _tunnel.PublicUrl : _tunnelSettings.LastPublicUrl;
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            AdminMessageText.Text = "Сначала включите интернет-доступ.";
+            return;
+        }
+        var code = BuildPairCode(url);
+        try
+        {
+            Clipboard.SetText(code);
+            AdminMessageText.Text = "Код подключения скопирован. В приложении: Настройки → «Вставить код».";
+        }
+        catch (Exception ex)
+        {
+            AdminMessageText.Text = "⚠ " + ex.Message;
+        }
+    }
 
     // ------------------------------------------------------------- users
 

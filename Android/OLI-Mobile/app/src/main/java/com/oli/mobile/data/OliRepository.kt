@@ -124,6 +124,8 @@ class OliRepository(private val context: Context) {
         for (candidate in listOf(creds.customServer, creds.lastEndpoint)) {
             if (candidate.isBlank()) continue
             val normalized = candidate.trim().trimEnd('/')
+            // A remembered https:// address is a tunnel: it only answers while the PC's
+            // OLI is open, so a failure here just means "ask again / use a fresh code".
             if (runCatching { api.health(normalized) }.isSuccess) {
                 selectOwnServer(normalized)
                 return normalized
@@ -142,6 +144,36 @@ class OliRepository(private val context: Context) {
         } finally {
             _discovering.value = false
         }
+    }
+
+    /**
+     * Connects with the "join code" from OLI on the PC (Пульт админа → интернет-доступ).
+     * This is the path that works on mobile data at university: the code carries the
+     * public tunnel address, so the phone needs no Wi-Fi and no typing of IPs.
+     * Returns the health of the reached server (throws ApiException when it is silent).
+     */
+    suspend fun useJoinCode(code: String): ServerHealth {
+        val parsed = api.parseJoinCode(code)
+            ?: throw OliApi.ApiException("Это не похоже на код подключения OLI. Скопируйте строку из пульта администратора целиком.")
+        val (url, invite) = parsed
+        val health = try {
+            api.health(url)
+        } catch (e: Exception) {
+            throw OliApi.ApiException(api.explain(url, e))
+        }
+        selectOwnServer(url)
+        if (invite.isNotBlank()) pendingInvite = invite
+        return health
+    }
+
+    /** Invite code that came inside a join code; the registration form prefills it. */
+    var pendingInvite: String = ""
+        private set
+
+    fun consumeInvite(): String {
+        val value = pendingInvite
+        pendingInvite = ""
+        return value
     }
 
     /** Makes [url] the active own-PC server without re-probing it. */
@@ -250,7 +282,12 @@ class OliRepository(private val context: Context) {
 
     suspend fun login(server: String, userName: String, password: String, remember: Boolean) {
         val target = server.ifBlank { api.baseUrl }
-        val result = api.login(target, userName, password)
+        val result = try {
+            api.login(target, userName, password)
+        } catch (e: OliApi.ApiException) {
+            // 401 stays as the server said it; transport failures get a human reason.
+            if (e.code == 0) throw OliApi.ApiException(api.explain(target, e)) else throw e
+        }
         api.token = result.token
         creds.rememberEndpoint(target)
         creds.saveSession(result.token, result.user, remember, password)
@@ -261,7 +298,11 @@ class OliRepository(private val context: Context) {
 
     suspend fun register(server: String, userName: String, password: String, displayName: String, invite: String, remember: Boolean) {
         val target = server.ifBlank { api.baseUrl }
-        val result = api.register(target, userName, password, displayName, invite)
+        val result = try {
+            api.register(target, userName, password, displayName, invite)
+        } catch (e: OliApi.ApiException) {
+            if (e.code == 0) throw OliApi.ApiException(api.explain(target, e)) else throw e
+        }
         api.token = result.token
         creds.rememberEndpoint(target)
         creds.saveSession(result.token, result.user, remember, password)

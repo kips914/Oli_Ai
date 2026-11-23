@@ -11,6 +11,12 @@ public sealed class ServerOptions
     public string Host { get; set; } = "0.0.0.0";
     public int Port { get; set; } = 8765;
 
+    /// <summary>
+    /// Public reverse-tunnel settings. Kept here so the desktop UI owns the state and
+    /// the server can report whether internet access is available.
+    /// </summary>
+    public OLI.Core.TunnelSettings Tunnel { get; set; } = new();
+
     /// <summary>llama.cpp server the gateway talks to.</summary>
     public string LlamaBaseUrl { get; set; } = "http://127.0.0.1:8080";
     /// <summary>Full model used while the user still has tokens (oli-pass).</summary>

@@ -71,9 +71,34 @@ public sealed class ServerSettings
     /// <summary>Light model used after the token limit is exhausted (Olim Son).</summary>
     public string LiteModel { get; set; } = "oli-son";
 
+    /// <summary>Public access for phones that are not on the same Wi-Fi (mobile data, university).</summary>
+    public TunnelSettings Tunnel { get; set; } = new();
+
     public string Preamble { get; set; } =
         "Ты OLI — локальный ИИ-помощник. Пользователь общается с тобой через мобильное приложение. " +
         "Отвечай кратко и по делу; длинные ответы структурируй списками.";
+}
+
+/// <summary>
+/// Settings for publishing the OLI server to the internet through a reverse tunnel,
+/// so a phone on mobile data (not on the home Wi-Fi) can still reach it.
+/// </summary>
+public sealed class TunnelSettings
+{
+    /// <summary>Start the tunnel together with the server.</summary>
+    public bool Enabled { get; set; }
+    /// <summary>cloudflared (default, no account) · ngrok · custom command.</summary>
+    public string Mode { get; set; } = "cloudflare";
+    /// <summary>Path to cloudflared.exe; empty = look next to OLI.exe and on PATH.</summary>
+    public string CloudflaredPath { get; set; } = "";
+    /// <summary>Path to ngrok.exe (only for Mode = ngrok).</summary>
+    public string NgrokPath { get; set; } = "";
+    /// <summary>ngrok authtoken (Mode = ngrok).</summary>
+    public string AuthToken { get; set; } = "";
+    /// <summary>Any command that prints a public https URL (Mode = custom), e.g. a named Cloudflare tunnel.</summary>
+    public string CustomCommand { get; set; } = "";
+    /// <summary>Last public address the tunnel reported, kept for the phone's join code.</summary>
+    public string LastPublicUrl { get; set; } = "";
 }
 
 public sealed class OliSettings

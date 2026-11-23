@@ -90,7 +90,8 @@ class OliApi private constructor() {
                     ok = json.optString("status") == "ok",
                     version = json.optString("version"),
                     registration = json.optBoolean("registration", true),
-                    llama = json.optBoolean("llama", false)
+                    llama = json.optBoolean("llama", false),
+                    viaInternet = target.startsWith("https://")
                 )
             } finally {
                 conn.disconnect()
@@ -100,8 +101,60 @@ class OliApi private constructor() {
             throw e
         } catch (e: Exception) {
             baseUrl = previous
+            // Throwable is kept as the cause so callers can explain() the real reason.
             throw ApiException("Не удалось подключиться к серверу: ${e.message ?: "ошибка сети"}")
         }
+    }
+
+    // ---------------------------------------------------------------- join code
+
+    /**
+     * "Join code" printed by OLI on the PC (Пульт админа → интернет-доступ).
+     * It is base64url("OLI1|https://xxx.trycloudflare.com|invite") so a student can
+     * paste one short line instead of retyping a random tunnel address.
+     * Returns the server URL and the invite code, or null when the text is not a code.
+     */
+    fun parseJoinCode(text: String): Pair<String, String>? {
+        var raw = text.trim()
+        if (raw.isEmpty()) return null
+        // Accept the code with whitespace/newlines pasted from a messenger.
+        raw = raw.filterNot { it.isWhitespace() }.removePrefix("oli://").removePrefix("OLI://")
+        if (!raw.startsWith("OLI1") && raw.length < 12) return null
+        return try {
+            val padded = raw.replace('-', '+').replace('_', '/').let {
+                when (it.length % 4) {
+                    2 -> "$it=="
+                    3 -> "$it="
+                    else -> it
+                }
+            }
+            val decoded = String(android.util.Base64.decode(padded, android.util.Base64.DEFAULT), Charsets.UTF_8)
+            val parts = decoded.split('|')
+            if (parts.size < 2 || parts[0] != "OLI1" || parts[1].isBlank()) null
+            else parts[1].trimEnd('/') to parts.getOrElse(2) { "" }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /** Turns a transport failure into something a student can act on. */
+    fun explain(server: String, error: Throwable?): String {
+        val target = normalize(server)
+        val raw = error?.message?.lowercase().orEmpty()
+        val hint = when {
+            raw.contains("failed to connect") || raw.contains("connection refused") ||
+                raw.contains("econnrefused") || raw.contains("timeout") || raw.contains("timed out") ->
+                "Компьютер не ответил. Проверьте: OLI запущен на ПК, сервер в OLI включён, телефон и ПК в одной Wi-Fi-сети — " +
+                    "или включите на ПК интернет-доступ и вставьте код подключения."
+            raw.contains("unknownhost") || raw.contains("unable to resolve") || raw.contains("nodename") ->
+                "Адрес не найден. Ссылка на туннель живёт только пока OLI на ПК открыт — скопируйте свежий код подключения."
+            raw.contains("cleartext") ->
+                "Android заблокировал незащищённое соединение — используйте адрес, который начинается с https://"
+            raw.contains("401") -> "Неверный логин или пароль."
+            else -> "Сервер не отвечает. Проверьте, что OLI на ПК открыт, и попробуйте снова."
+        }
+        val where = target.replace("https://", "").replace("http://", "").ifBlank { "адрес не указан" }
+        return "$hint\nСейчас: $where"
     }
 
     /** Looks up the app's default (cloud) server from a small JSON endpoint. */

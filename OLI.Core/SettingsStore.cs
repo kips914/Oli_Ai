@@ -44,6 +44,7 @@ public static class SettingsStore
         {
             settings.Telegram ??= new TelegramSettings();
             settings.Server ??= new ServerSettings();
+            settings.Server.Tunnel ??= new TunnelSettings();
             settings.Server.Port = Math.Clamp(settings.Server.Port, 1024, 65535);
             settings.Server.UserQuotaBytes = Math.Clamp(settings.Server.UserQuotaBytes,
                 64L * 1024 * 1024, 50L * 1024 * 1024 * 1024);

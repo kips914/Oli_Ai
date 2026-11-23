@@ -58,6 +58,8 @@ fun SettingsScreen(
     onOpenProfile: () -> Unit = {}
 ) {
     var ownServer by remember { mutableStateOf(repo.usingOwnServer) }
+    var joinCode by remember { mutableStateOf("") }
+    var joining by remember { mutableStateOf(false) }
     var serverField by remember { mutableStateOf(repo.customServer) }
     var status by remember { mutableStateOf<String?>(null) }
     var searching by remember { mutableStateOf(false) }
@@ -192,6 +194,80 @@ fun SettingsScreen(
                 }
             )
         }
+
+        // ---------------------------------------------------------- join code (works on mobile data)
+        OutlinedTextField(
+            value = joinCode,
+            onValueChange = { joinCode = it },
+            label = { Text("Код подключения с ПК") },
+            placeholder = { Text("OLI1… или https://…") },
+            singleLine = true,
+            enabled = !demo && !joining,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+            modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
+        )
+        Row(
+            Modifier.padding(top = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(
+                enabled = !demo && joinCode.isNotBlank() && !joining,
+                onClick = {
+                    scope.launch {
+                        joining = true
+                        status = "Проверяю адрес из кода…"
+                        try {
+                            val text = joinCode.trim()
+                            if (text.startsWith("http://") || text.startsWith("https://")) {
+                                repo.useOwnServer(text)
+                                serverField = text
+                            } else {
+                                repo.useJoinCode(text)
+                                serverField = repo.customServer
+                            }
+                            ownServer = true
+                            val invite = repo.consumeInvite()
+                            status = "Подключено: " +
+                                repo.serverUrl.replace("https://", "").replace("http://", "") +
+                                (if (invite.isNotBlank()) " · код приглашения подставлен при регистрации" else "")
+                        } catch (e: Exception) {
+                            status = e.message ?: "Код не подошёл"
+                        } finally {
+                            joining = false
+                        }
+                    }
+                }
+            ) { Text(if (joining) "Проверяю…" else "Подключиться по коду") }
+            OutlinedButton(
+                enabled = !demo && !joining,
+                onClick = {
+                    scope.launch {
+                        joining = true
+                        status = "Пробую запомненный адрес…"
+                        try {
+                            val found = repo.findOwnServer()
+                            status = if (found != null) {
+                                serverField = found
+                                "Найден компьютер: " + found.replace("http://", "").replace("https://", "")
+                            } else {
+                                "Не нашёл. На ПК включите интернет-доступ и скопируйте код."
+                            }
+                        } catch (e: Exception) {
+                            status = "Поиск не удался: ${e.message}"
+                        } finally {
+                            joining = false
+                        }
+                    }
+                }
+            ) { Text("Найти заново") }
+        }
+        Text(
+            "Код берётся на компьютере: OLI → «Пульт админа» → «🌍 Дам доступ из интернета» → «⧉ Копировать код». " +
+                "Так подключение работает и на мобильном интернете — Wi-Fi не нужен.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 6.dp)
+        )
 
         if (ownServer) {
             OutlinedTextField(

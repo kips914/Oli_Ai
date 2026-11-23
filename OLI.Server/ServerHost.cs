@@ -180,6 +180,9 @@ public sealed class ServerHost : IAsyncDisposable
             time = DateTimeOffset.UtcNow,
             registration = _options.AllowRegistration,
             llama = await _llama.IsAliveAsync(ct),
+            // Lets the phone tell "my PC is reachable but the model is off" from "wrong address".
+            model = _options.Model,
+            server = "oli-server",
         }));
 
         // ------------------------------------------------------------ auth

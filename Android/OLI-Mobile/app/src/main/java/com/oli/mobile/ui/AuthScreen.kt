@@ -82,6 +82,8 @@ fun AuthScreen(repo: OliRepository, defaultServerOffline: Boolean, onDemo: () ->
     var serverField by remember { mutableStateOf(repo.customServer) }
     var showServerField by remember { mutableStateOf(false) }
     var searching by remember { mutableStateOf(false) }
+    var joinCode by remember { mutableStateOf("") }
+    var joining by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     // The app connects by itself on open; the user does not type an address.
@@ -103,7 +105,7 @@ fun AuthScreen(repo: OliRepository, defaultServerOffline: Boolean, onDemo: () ->
             showServerField = true
             ownServer = repo.usingOwnServer
             error = if (repo.usingOwnServer)
-                "Свой сервер не отвечает. Нажмите «Найти мой ПК» или впишите адрес вручную."
+                "Компьютер не отвечает. Если вы не дома (мобильный интернет), вставьте код подключения ниже."
             else
                 "Сервер OLI сейчас недоступен. Можно посмотреть интерфейс без входа или подключить свой ПК."
         }
@@ -175,6 +177,82 @@ fun AuthScreen(repo: OliRepository, defaultServerOffline: Boolean, onDemo: () ->
                 address = repo.serverUrl,
                 onClick = { showServerField = !showServerField }
             )
+
+            Spacer(Modifier.height(12.dp))
+
+            // ---- connect by code: the only thing a student has to do on mobile data
+            Card(
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(14.dp)) {
+                    Text("Код подключения к своему ПК", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "Работает и на мобильном интернете. На компьютере: OLI → «Пульт админа» → " +
+                            "«🌍 Дам доступ из интернета» → «⧉ Копировать код». Вставьте код сюда.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = joinCode,
+                            onValueChange = { joinCode = it; error = null },
+                            label = { Text("Код или https-адрес") },
+                            singleLine = true,
+                            enabled = !joining,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Button(
+                            enabled = joinCode.isNotBlank() && !joining,
+                            onClick = {
+                                joining = true
+                                error = null
+                                info = null
+                                scope.launch {
+                                    try {
+                                        // A plain https:// address is accepted too, not only the code.
+                                        val text = joinCode.trim()
+                                        val isLink = text.startsWith("http://") || text.startsWith("https://")
+                                        if (isLink) {
+                                            health = repo.useOwnServer(text)
+                                            serverField = text
+                                        } else {
+                                            health = repo.useJoinCode(text)
+                                            serverField = repo.customServer
+                                            val inviteCode = repo.consumeInvite()
+                                            if (inviteCode.isNotBlank()) invite = inviteCode
+                                        }
+                                        ownServer = true
+                                        showServerField = false
+                                        info = "Подключено: " +
+                                            repo.serverUrl.replace("https://", "").replace("http://", "")
+                                    } catch (e: Exception) {
+                                        health = null
+                                        error = e.message ?: "Код не подошёл"
+                                    } finally {
+                                        joining = false
+                                    }
+                                }
+                            }
+                        ) { Text(if (joining) "…" else "Войти") }
+                    }
+                    if (joining) {
+                        Text(
+                            "Проверяю адрес… первый ответ через туннель может занять до 10 секунд.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                }
+            }
 
             Spacer(Modifier.height(16.dp))
 

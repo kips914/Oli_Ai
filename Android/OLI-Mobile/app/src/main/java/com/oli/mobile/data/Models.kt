@@ -6,7 +6,9 @@ data class ServerHealth(
     val ok: Boolean,
     val version: String,
     val registration: Boolean,
-    val llama: Boolean
+    val llama: Boolean,
+    /** True when the answer came in one piece (tunnel) instead of a local Wi-Fi socket. */
+    val viaInternet: Boolean = false
 )
 
 data class UserProfile(

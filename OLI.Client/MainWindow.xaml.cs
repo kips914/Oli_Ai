@@ -838,6 +838,7 @@ public partial class MainWindow : Window
         OpenWeb = _settings.WebSearchOpenWeb,
         WorkspaceToolsEnabled = _settings.Server.WorkspaceToolsEnabled,
         Preamble = _settings.Server.Preamble,
+        Tunnel = _settings.Server.Tunnel,
     });
 
     private void RefreshServerUi()
@@ -852,10 +853,14 @@ public partial class MainWindow : Window
 
         var address = NetworkInfo.PreferredAddress();
         var allAddresses = NetworkInfo.LocalAddresses();
+        var publicUrl = _settings.Server.Tunnel.LastPublicUrl;
         ServerAddressLine.Text = running && address is not null
-            ? $"Адрес для телефона: http://{address}:{_settings.Server.Port}" +
+            ? $"Адрес для телефона по Wi-Fi: http://{address}:{_settings.Server.Port}" +
               (allAddresses.Count > 1 ? $"   (ещё: {string.Join(", ", allAddresses.Where(a => a != address))})" : "") +
-              "  · в приложении кнопка «Найти мой ПК» находит сервер сама"
+              "  · в приложении кнопка «Найти мой ПК» находит сервер сама" +
+              (publicUrl.Length > 0
+                  ? $"{Environment.NewLine}Через интернет: {publicUrl} — включите в пульте администратора «Дам доступ из интернета» (мобильный интернет, учёба)."
+                  : $"{Environment.NewLine}Мобильный интернет / учёба: пульт администратора → «🌍 Дам доступ из интернета» и код подключения для телефона.")
             : "Адрес для телефона появится после запуска (нужен Wi-Fi в той же сети или VPN).";
         ServerQuotaText.Text = TextExtractors.FormatSize((long)ServerQuotaSlider.Value * 1024 * 1024);
     }
@@ -864,8 +869,9 @@ public partial class MainWindow : Window
     {
         PersistSettings();
         _serverHost ??= CreateServerHost();
-        var window = new AdminWindow(_serverHost) { Owner = this };
+        var window = new AdminWindow(_serverHost, _settings.Server.Tunnel) { Owner = this };
         window.ShowDialog();
+        SettingsStore.Save(_settings);
         RefreshServerUi();
     }
 

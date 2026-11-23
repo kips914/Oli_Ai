@@ -39,6 +39,7 @@ var options = new ServerOptions
     MinDailyTokens = s.MinDailyTokens,
     BusyUsers = s.BusyUsers,
     Preamble = string.IsNullOrWhiteSpace(s.Preamble) ? new ServerOptions().Preamble : s.Preamble,
+    Tunnel = s.Tunnel ?? new TunnelSettings(),
 };
 
 for (var i = 0; i < args.Length; i++)
@@ -115,6 +116,10 @@ Console.WriteLine($" Регистрация:        {(options.AllowRegistration 
 Console.WriteLine();
 Console.WriteLine(" В приложении на телефоне: «Свой ПК как сервер» → «Найти мой ПК».");
 Console.WriteLine(" Сервер найдётся сам — вписывать адрес не нужно.");
+if (!string.IsNullOrWhiteSpace(options.Tunnel.LastPublicUrl))
+    Console.WriteLine($" Через интернет:      {options.Tunnel.LastPublicUrl} (включите туннель в пульте администратора)");
+Console.WriteLine(" Мобильный интернет / учёба: OLI на ПК → «Пульт админа» → «🌍 Дам доступ из интернета»,");
+Console.WriteLine(" затем в приложении: Настройки → «Вставить код подключения».");
 Console.WriteLine();
 Console.WriteLine(" Ctrl+C — остановить сервер.");
 
