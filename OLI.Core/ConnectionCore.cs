@@ -121,15 +121,17 @@ public static class ConnectionCore
         var raw = new string(text.Where(c => !char.IsWhiteSpace(c)).ToArray());
         raw = raw.Trim('"', '\'');
 
+        // QR scanners and messengers add "oli://" to the code; strip it before anything
+        // else, otherwise the scheme check below mistakes the prefix for an address.
+        if (raw.StartsWith(JoinScheme, StringComparison.OrdinalIgnoreCase))
+            raw = raw[JoinScheme.Length..];
+
         // A plain address is accepted too: "192.168.1.10:6767" or "https://x.trycloudflare.com".
         if (raw.Contains("://", StringComparison.Ordinal) || LooksLikeAddress(raw))
         {
             var normalized = Normalize(raw);
             return normalized is null ? null : new JoinCodeInfo(normalized, "", false);
         }
-
-        if (raw.StartsWith(JoinScheme, StringComparison.OrdinalIgnoreCase))
-            raw = raw[JoinScheme.Length..];
 
         // The code is base64 of "OLI1|…", so it never *starts* with "OLI1" on the wire.
         // Decode first, then check the payload; a literal "OLI1|url|invite" still works.

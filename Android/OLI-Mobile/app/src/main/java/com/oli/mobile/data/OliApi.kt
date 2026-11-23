@@ -119,14 +119,15 @@ class OliApi private constructor() {
      * Returns the server URL and the invite code, or null when the text is not a code.
      */
     fun parseJoinCode(text: String): Pair<String, String>? {
-        val raw = text.trim()
+        var raw = text.filterNot { it.isWhitespace() }.trim('"', '\'')
         if (raw.isEmpty()) return null
+
+        // Messengers and QR scanners add "oli://" — strip it before anything else.
+        if (raw.startsWith("oli://", ignoreCase = true)) raw = raw.substring("oli://".length)
 
         // A plain address is accepted too: "192.168.1.10:6767", "https://x.trycloudflare.com".
         // Same shape rule as ConnectionCore.LooksLikeAddress: a single word ("привет") is
         // not an address, otherwise every typo becomes a silent connection attempt.
-        // No backslashes on purpose: the regex classes below need none, and escaping
-        // through several layers of source files is how this used to break the build.
         val looksLikeUrl = raw.contains("://") || raw.matches(Regex("^[A-Za-z0-9._-]+:[0-9]{1,5}$")) ||
             raw.matches(Regex("^[A-Za-z0-9_-]+([.][A-Za-z0-9_-]+)+$")) ||
             raw.equals("localhost", ignoreCase = true)
@@ -135,24 +136,31 @@ class OliApi private constructor() {
             return if (address.isBlank()) null else address to ""
         }
 
-        val code = raw.filterNot { it.isWhitespace() }
-            .removePrefix("oli://").removePrefix("OLI://")
-        if (!code.startsWith("OLI1")) return null
+        // The code is base64 of "OLI1|url|invite", so it never starts with "OLI1" on the
+        // wire: decode first, then check the payload.
         return try {
-            val padded = code.replace('-', '+').replace('_', '/').let {
-                when (it.length % 4) {
-                    2 -> "$it=="
-                    3 -> "$it="
-                    else -> it
-                }
-            }
-            val decoded = String(android.util.Base64.decode(padded, android.util.Base64.DEFAULT), Charsets.UTF_8)
+            val decoded = if (raw.startsWith("OLI1")) raw else String(decodeBase64Url(raw), Charsets.UTF_8)
             val parts = decoded.split('|')
-            if (parts.size < 2 || parts[0] != "OLI1" || parts[1].isBlank()) null
-            else normalize(parts[1]) to parts.getOrElse(2) { "" }
+            if (parts.size < 2 || parts[0] != "OLI1" || parts[1].isBlank()) {
+                null
+            } else {
+                val address = normalize(parts[1])
+                if (address.isBlank()) null else address to parts.getOrElse(2) { "" }
+            }
         } catch (_: Exception) {
             null
         }
+    }
+
+    private fun decodeBase64Url(text: String): ByteArray {
+        val padded = text.replace('-', '+').replace('_', '/').let {
+            when (it.length % 4) {
+                2 -> "$it=="
+                3 -> "$it="
+                else -> it
+            }
+        }
+        return android.util.Base64.decode(padded, android.util.Base64.DEFAULT)
     }
 
     /** Turns a transport failure into something a student can act on. */
