@@ -18,6 +18,8 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.aspectRatio
@@ -61,7 +63,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowUpward
-import androidx.compose.material.icons.filled.ElectricBolt
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.CircularProgressIndicator
@@ -331,8 +332,22 @@ private fun TopBar(
 
         GlassPill(onClick = onModel) {
             Row(Modifier.padding(horizontal = 14.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.ElectricBolt, contentDescription = null, tint = OliBlueBright, modifier = Modifier.size(15.dp))
-                Spacer(Modifier.width(6.dp))
+                var pulse by remember { mutableStateOf(false) }
+                LaunchedEffect(Unit) {
+                    while (true) {
+                        kotlinx.coroutines.delay(1500)
+                        pulse = !pulse
+                    }
+                }
+                val dotScale by animateFloatAsState(if (pulse) 1f else 0.62f, tween(1400), label = "dotScale")
+                Box(
+                    Modifier
+                        .size(9.dp)
+                        .scale(dotScale)
+                        .clip(CircleShape)
+                        .background(Brush.linearGradient(listOf(OliBlueBright, OliCyan)))
+                )
+                Spacer(Modifier.width(8.dp))
                 Text(modelTitle, style = MaterialTheme.typography.labelMedium, color = OliText, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.width(6.dp))
                 Text("▾", style = MaterialTheme.typography.labelMedium, color = OliTextMuted)
@@ -456,10 +471,10 @@ private fun SuggestionRow(onPick: (String) -> Unit) {
             .padding(horizontal = 14.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
+        ActionChip("📷 Что на фото?", onClick = { onPick("Пришлите фото кнопкой 📷 — я разберу, что на нём, и отвечу по делу.") })
         ActionChip("Новый проект", onClick = { onPick("Помоги начать новый проект: спроси меня о деталях и составь план.") })
         ActionChip("Сводка дня", onClick = { onPick("Сделай короткую сводку дня и предложи 3 задачи на завтра.") })
-        ActionChip("Переписать", onClick = { onPick("Перепиши мой текст короче и яснее — я пришлю его следующим сообщением.") })
-        ActionChip("Перевод", onClick = { onPick("Помоги перевести текст — я пришлю его следующим сообщением.") })
+        ActionChip("Код", onClick = { onPick("Напиши функцию на Python, которая переименовывает файлы по дате.") })
     }
 }
 
@@ -599,8 +614,10 @@ private fun Composer(
                 contentAlignment = Alignment.Center
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButtonBox(icon = Icons.Filled.Add, description = "Файлы", onClick = onAttach)
+                    IconButtonBox(icon = Icons.Filled.Add, description = "Хранилище и файлы", onClick = onAttach)
                     IconButtonBox(icon = Icons.Filled.PhotoCamera, description = "Фото для анализа", onClick = onPickImage)
+                    // live microphone: speech becomes text in the input field
+                    VoiceButton(onText = onValueChange, enabled = enabled)
                     Box(Modifier.weight(1f)) {
                         if (value.isEmpty()) {
                             Text(placeholder, style = MaterialTheme.typography.bodyLarge, color = OliTextMuted, maxLines = 1)
@@ -617,13 +634,95 @@ private fun Composer(
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
-                    IconButtonBox(icon = Icons.Filled.GraphicEq, description = "Голос", onClick = {})
                 }
             }
 
             Spacer(Modifier.width(8.dp))
 
             SendButton(enabled = enabled && value.isNotBlank(), onClick = onSend)
+        }
+    }
+}
+
+/**
+ * Live microphone: turns speech into text in the input field, so the button is not a
+ * decoration. Works through the system recogniser; when none is installed it says so
+ * instead of doing nothing.
+ */
+@Composable
+private fun VoiceButton(onText: (String) -> Unit, enabled: Boolean) {
+    val context = LocalContext.current
+    val haptics = LocalHapticFeedback.current
+    var listening by remember { mutableStateOf(false) }
+    var failure by remember { mutableStateOf<String?>(null) }
+
+    val launcher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        listening = false
+        if (result.resultCode != android.app.Activity.RESULT_OK) return@rememberLauncherForActivityResult
+        val spoken = result.data
+            ?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)
+            ?.firstOrNull()
+            .orEmpty()
+        if (spoken.isNotBlank()) onText(spoken)
+    }
+
+    fun start() {
+        failure = null
+        val intent = android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(
+                android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+            )
+            putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, java.util.Locale.getDefault().toLanguageTag())
+            putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "Говорите — текст появится в поле ввода")
+        }
+        if (intent.resolveActivity(context.packageManager) == null) {
+            failure = "На телефоне нет распознавания речи"
+            return
+        }
+        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        listening = true
+        runCatching { launcher.launch(intent) }.onFailure {
+            listening = false
+            failure = "Не удалось запустить микрофон"
+        }
+    }
+
+    val pulse by androidx.compose.animation.core.rememberInfiniteTransition(label = "mic")
+        .animateFloat(
+            initialValue = 0.4f,
+            targetValue = 1f,
+            animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+                androidx.compose.animation.core.tween(700, easing = androidx.compose.animation.core.LinearEasing),
+                androidx.compose.animation.core.RepeatMode.Reverse
+            ),
+            label = "micPulse"
+        )
+
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(if (listening) OliBlue.copy(alpha = 0.35f * pulse) else Color.Transparent)
+                .clickable(enabled = enabled) { start() },
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                androidx.compose.material.icons.Icons.Filled.Mic,
+                contentDescription = "Голосовой ввод",
+                tint = if (listening) OliBlueBright else OliTextMuted,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+        failure?.let {
+            Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+            LaunchedEffect(it) {
+                kotlinx.coroutines.delay(2500)
+                failure = null
+            }
         }
     }
 }
@@ -709,6 +808,16 @@ private fun MessageBubble(message: OliRepository.ChatMessage, onImageTap: (andro
                 )
                 .padding(horizontal = 15.dp, vertical = 11.dp)
         ) {
+            if (!isUser) {
+                // glass sheen: a slow highlight that makes the bubble feel physical
+                GlassSheen(
+                    Modifier
+                        .matchParentSize()
+                        .clip(
+                            RoundedCornerShape(18.dp, 18.dp, 18.dp, 6.dp)
+                        )
+                )
+            }
             Column {
                 message.image?.let { bitmap ->
                     Image(
@@ -757,7 +866,7 @@ private fun TypingBubble() {
                 .padding(horizontal = 15.dp, vertical = 12.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = OliBlueBright)
+                EqualizerBars(bars = 4)
                 Spacer(Modifier.width(10.dp))
                 ThinkingWord()
             }
@@ -872,6 +981,7 @@ internal fun GlassPill(onClick: () -> Unit, content: @Composable () -> Unit) {
 internal fun GlassCircleButton(onClick: () -> Unit, content: @Composable () -> Unit) {
     Box(
         Modifier
+            .pressableScale(pressedScale = 0.92f)
             .size(44.dp)
             .clip(CircleShape)
             .background(OliGlass)
@@ -885,6 +995,7 @@ internal fun GlassCircleButton(onClick: () -> Unit, content: @Composable () -> U
 internal fun GlassCard(modifier: Modifier = Modifier, onClick: () -> Unit, content: @Composable () -> Unit) {
     Box(
         modifier
+            .pressableScale(pressedScale = 0.97f)
             .clip(RoundedCornerShape(16.dp))
             .background(OliGlass.copy(alpha = 0.85f))
             .border(1.dp, OliOutline.copy(alpha = 0.7f), RoundedCornerShape(16.dp))
@@ -896,6 +1007,7 @@ internal fun GlassCard(modifier: Modifier = Modifier, onClick: () -> Unit, conte
 internal fun ActionChip(text: String, onClick: () -> Unit) {
     Box(
         Modifier
+            .pressableScale()
             .clip(RoundedCornerShape(22.dp))
             .background(OliGlass)
             .border(1.dp, OliOutline.copy(alpha = 0.8f), RoundedCornerShape(22.dp))

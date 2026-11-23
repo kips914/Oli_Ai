@@ -18,6 +18,9 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.draw.scale
+import androidx.compose.foundation.interaction.interactionSource
+import androidx.compose.foundation.layout.width
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -168,4 +171,100 @@ fun Sparkles(modifier: Modifier = Modifier, color: Color = OliBlueBright) {
             )
         }
     }
+}
+
+/** A slow specular highlight running across a glass surface (bubbles, cards). */
+@Composable
+fun GlassSheen(
+    modifier: Modifier = Modifier,
+    colors: List<Color> = listOf(OliBlueBright, Color.White),
+    periodMillis: Int = 5200
+) {
+    val transition = rememberInfiniteTransition(label = "sheen")
+    val phase by transition.animateFloat(
+        initialValue = -0.6f,
+        targetValue = 1.6f,
+        animationSpec = infiniteRepeatable(tween(periodMillis, easing = LinearEasing), RepeatMode.Restart),
+        label = "sheenPhase"
+    )
+    Canvas(modifier) {
+        if (size.width <= 0f || size.height <= 0f) return@Canvas
+        val x = size.width * phase
+        drawRect(
+            brush = Brush.linearGradient(
+                colors = listOf(Color.Transparent, colors.first().copy(alpha = 0.10f), Color.Transparent),
+                start = Offset(x - size.width * 0.35f, 0f),
+                end = Offset(x + size.width * 0.35f, size.height)
+            ),
+            size = Size(size.width, size.height)
+        )
+    }
+}
+
+/** Tiny equaliser bars — the "OLI is working" indicator that reads as live sound/data. */
+@Composable
+fun EqualizerBars(modifier: Modifier = Modifier, bars: Int = 3, color: Color = OliBlueBright) {
+    val transition = rememberInfiniteTransition(label = "eq")
+    val phase by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = (Math.PI * 2).toFloat(),
+        animationSpec = infiniteRepeatable(tween(1200, easing = LinearEasing), RepeatMode.Restart),
+        label = "eqPhase"
+    )
+    androidx.compose.foundation.Canvas(modifier.size(width = (bars * 6).dp, height = 14.dp)) {
+        val barWidth = size.width / (bars * 2f)
+        for (i in 0 until bars) {
+            val level = 0.35f + 0.65f * kotlin.math.abs(kotlin.math.sin(phase + i * 0.9f))
+            val height = size.height * level
+            drawRoundRect(
+                color = color.copy(alpha = 0.85f),
+                topLeft = Offset(i * barWidth * 2f, (size.height - height) / 2f),
+                size = Size(barWidth, height),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth / 2f)
+            )
+        }
+    }
+}
+
+/** A soft ring that expands and fades — the classic "tap ripple" for primary buttons. */
+@Composable
+fun RippleEmitter(trigger: Int, color: Color = OliBlueBright, modifier: Modifier = Modifier) {
+    val progress = androidx.compose.runtime.remember { androidx.compose.animation.core.Animatable(1f) }
+    androidx.compose.runtime.LaunchedEffect(trigger) {
+        if (trigger == 0) return@LaunchedEffect
+        progress.snapTo(0f)
+        progress.animateTo(1f, tween(600, easing = LinearEasing))
+    }
+    Canvas(modifier.size(72.dp)) {
+        if (progress.value >= 1f) return@Canvas
+        val radius = size.minDimension / 2f * (0.4f + 0.6f * progress.value)
+        drawCircle(
+            color = color.copy(alpha = 0.5f * (1f - progress.value)),
+            radius = radius,
+            center = center,
+            style = Stroke(width = 2f)
+        )
+    }
+}
+
+/**
+ * Press feedback: the surface shrinks slightly with a soft spring while held.
+ * Makes every card and chip feel like a physical key without a heavy animation.
+ */
+@Composable
+fun Modifier.pressableScale(pressedScale: Float = 0.96f): Modifier {
+    val source = androidx.compose.runtime.remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val pressed by androidx.compose.foundation.interaction.collectIsPressedAsState(source)
+    val target = if (pressed) pressedScale else 1f
+    val scale by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = target,
+        animationSpec = androidx.compose.animation.core.spring(
+            dampingRatio = 0.55f,
+            stiffness = androidx.compose.animation.core.Spring.StiffnessHigh
+        ),
+        label = "pressScale"
+    )
+    return this
+        .then(Modifier.interactionSource(source))
+        .then(Modifier.scale(scale))
 }
