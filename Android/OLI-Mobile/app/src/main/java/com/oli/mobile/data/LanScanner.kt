@@ -54,9 +54,7 @@ object LanScanner {
             .sortedBy { it.second } // не виртуальные интерфейсы первыми
             .map { it.first }
             .distinct()
-    } catch (_: Exception) {
-        emptyList()
-    }
+    }.getOrElse { emptyList() }
 
     /**
      * Ищет сервер OLI: сначала в своей подсети, затем (если не нашёлся) в подсетях
