@@ -161,16 +161,16 @@ public partial class AdminWindow : Window
             : _tunnel.StatusLine;
 
         var url = running ? _tunnel.PublicUrl : _tunnelSettings.LastPublicUrl;
-        var lines = new List<string>();
+        var pairing = new List<string>();
         if (!string.IsNullOrWhiteSpace(url))
         {
-            lines.Add("Код для телефона вне дома (" + (running ? "интернет-доступ работает" : "последний адрес") +
+            pairing.Add("Код для телефона вне дома (" + (running ? "интернет-доступ работает" : "последний адрес") +
                       "). В приложении: Настройки → «Вставить код»:");
-            lines.Add(BuildPairCode(url));
+            pairing.Add(BuildPairCode(url));
         }
         else
         {
-            lines.Add("Код для телефона вне дома появится после «🌍 Дам доступ из интернета».");
+            pairing.Add("Код для телефона вне дома появится после «🌍 Дам доступ из интернета».");
         }
 
         // Home Wi-Fi needs no code, but a code is still the fastest way to pair.
@@ -180,11 +180,11 @@ public partial class AdminWindow : Window
                 .FirstOrDefault(a => a.IsWifiOrEthernet && !OLI.Core.NetworkAddresses.IsVirtualAddress(a.Address));
             if (lan is not null)
             {
-                lines.Add("");
-                lines.Add($"Дома (один Wi-Fi) код не обязателен: http://{lan.Address}:{_host.Options.Port}");
+                pairing.Add("");
+                pairing.Add($"Дома (один Wi-Fi) код не обязателен: http://{lan.Address}:{_host.Options.Port}");
             }
         }
-        TunnelPairText.Text = string.Join(Environment.NewLine, lines);
+        TunnelPairText.Text = string.Join(Environment.NewLine, pairing);
 
         if (TunnelLogText.Visibility == Visibility.Visible && !_phoneReportShown)
         {
