@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Net.Http;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -180,8 +181,10 @@ public sealed class ServerHost : IAsyncDisposable
             time = DateTimeOffset.UtcNow,
             registration = _options.AllowRegistration,
             llama = await _llama.IsAliveAsync(ct),
-            // Lets the phone tell "my PC is reachable but the model is off" from "wrong address".
+            // Lets the phone tell "my PC is reachable but the model is off" from "wrong address",
+            // and name the engine the user actually runs (llama.cpp or Ollama).
             model = _options.Model,
+            engine = _llama.IsOllama == true ? "ollama" : "llama.cpp",
             server = "oli-server",
         }));
 
@@ -308,7 +311,23 @@ public sealed class ServerHost : IAsyncDisposable
                 session.SelectModel(modelId);
                 session.SetAnswerBudget(exhausted ? 220 : 0);
 
-                var answer = await session.SendAsync(text, progress: null, ct);
+                AgentAnswer answer;
+                try
+                {
+                    answer = await session.SendAsync(text, progress: null, ct);
+                }
+                catch (HttpRequestException ex)
+                {
+                    // The PC is fine; the model engine is not. Say exactly that.
+                    var reason = ex.Message;
+                    OliLog.Warning("CHAT", "Движок модели: " + reason);
+                    return Results.Json(new
+                    {
+                        error = reason,
+                        engine = "down",
+                        httpStatus = ex.StatusCode is null ? 0 : (int)ex.StatusCode,
+                    }, statusCode: 503);
+                }
 
                 _chats.Append(account.Id, thread.Id, new StoredMessage
                 {
@@ -360,9 +379,21 @@ public sealed class ServerHost : IAsyncDisposable
             var (hourUsed, dayUsed) = _usage.For(account.Id);
             var selected = string.IsNullOrWhiteSpace(account.ModelId) ? _options.Model : account.ModelId;
 
+            // The real backend may be Ollama, whose model names differ from OLI's own ids.
+            var backendModels = await _llama.ListModelsAsync();
+            var served = backendModels.Count > 0 ? backendModels[0] : "";
+
             return Results.Json(new
             {
                 selected,
+                backend = new
+                {
+                    url = _options.LlamaBaseUrl,
+                    // "ollama" or "llama.cpp" — lets the phone say which engine answers.
+                    kind = _llama.IsOllama == true ? "ollama" : "llama.cpp",
+                    models = backendModels,
+                    served,
+                },
                 models = new object[]
                 {
                     ModelInfo(_options.Model, "oli-pass", "Olim Pass"),

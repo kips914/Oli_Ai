@@ -348,6 +348,29 @@ class OliRepository(private val context: Context) {
 
     // ------------------------------------------------------------- chat
 
+    /**
+     * What exactly is wrong right now, in one sentence: the phone cannot reach the PC at
+     * all, or the PC answers but its model engine is off. Used before a chat message so
+     * the user does not stare at a red dot with no explanation.
+     */
+    suspend fun diagnoseConnection(): String? = withContext(Dispatchers.IO) {
+        val target = (api.baseUrl.ifBlank { serverUrl }).trimEnd('/')
+        val health = try {
+            api.health(target)
+        } catch (e: Exception) {
+            return@withContext api.explain(target, e)
+        }
+        // health() restores the previous baseUrl on failure; keep the reachable one.
+        api.baseUrl = target
+        if (!health.ok) return@withContext "Сервер OLI на ПК ответил неожиданно — проверьте версию OLI."
+        if (!health.llama) {
+            val engine = health.engine.ifBlank { "движок модели" }
+            return@withContext "ПК доступен, но $engine не отвечает. Запустите движок модели на компьютере " +
+                "(Ollama: ollama serve · llama.cpp: scripts\\start-llama.ps1) — затем отправьте сообщение снова."
+        }
+        null
+    }
+
     suspend fun send(text: String): String? {
         if (text.isBlank()) return null
         _messages.value = _messages.value + ChatMessage(nextId++, fromUser = true, text = text.trim())
@@ -373,7 +396,11 @@ class OliRepository(private val context: Context) {
             refreshUsage()
             null
         } catch (e: Exception) {
-            val message = e.message ?: "Ошибка сети"
+            // 503 from the server means "PC is fine, its model engine is down".
+            val message = if (e is OliApi.ApiException && (e.code == 503 || e.code == 0))
+                api.explain(api.baseUrl, e)
+            else
+                e.message ?: "Ошибка сети"
             _messages.value = _messages.value + ChatMessage(nextId++, fromUser = false, text = "⚠ $message")
             message
         } finally {

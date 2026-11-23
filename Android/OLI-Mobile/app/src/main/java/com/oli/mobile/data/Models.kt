@@ -8,7 +8,9 @@ data class ServerHealth(
     val registration: Boolean,
     val llama: Boolean,
     /** True when the answer came in one piece (tunnel) instead of a local Wi-Fi socket. */
-    val viaInternet: Boolean = false
+    val viaInternet: Boolean = false,
+    /** "ollama" or "llama.cpp" — the engine running on the PC. */
+    val engine: String = ""
 )
 
 data class UserProfile(

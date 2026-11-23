@@ -330,6 +330,42 @@ fun SettingsScreen(
                 modifier = Modifier.padding(top = 6.dp)
             )
         }
+        // ---- "check everything" button: replaced a guess with a real answer
+        Row(
+            Modifier.padding(top = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedButton(
+                enabled = !demo && !joining,
+                onClick = {
+                    scope.launch {
+                        joining = true
+                        status = "Проверяю телефон → ПК → движок модели…"
+                        status = try {
+                            val problem = repo.diagnoseConnection()
+                            if (problem != null) {
+                                problem
+                            } else {
+                                val health = OliApi.shared.health(repo.serverUrl)
+                                buildString {
+                                    append("ПК отвечает (OLI ")
+                                    append(health.version.ifBlank { "?" })
+                                    append(", ")
+                                    append(if (health.viaInternet) "интернет" else "Wi-Fi")
+                                    append("). Движок модели работает")
+                                    if (health.engine.isNotBlank()) append(" (${health.engine})")
+                                }
+                            }
+                        } catch (e: Exception) {
+                            e.message ?: "Не удалось проверить"
+                        } finally {
+                            joining = false
+                        }
+                    }
+                }
+            ) { Text("Проверить всё") }
+        }
+
         status?.let {
             Text(it, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 6.dp),
                 color = MaterialTheme.colorScheme.onSurfaceVariant)

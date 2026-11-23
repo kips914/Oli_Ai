@@ -21,6 +21,20 @@
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="0,0,8,0">
 
+                <!-- ===== Engine (llama.cpp or Ollama) ===== -->
+                <TextBlock x:Name="EngineSectionText" Text="Движок модели" Style="{StaticResource SectionTitle}"/>
+                <TextBox x:Name="EngineUrlBox" Style="{StaticResource FieldTextBox}" Margin="0,0,0,6"
+                         TextChanged="EngineUrl_TextChanged"/>
+                <TextBlock Style="{StaticResource Caption}" Margin="0,0,0,10" TextWrapping="Wrap"
+                           Text="Адрес OpenAI-совместимого сервера. llama.cpp: http://127.0.0.1:8080 · Ollama: http://127.0.0.1:11434 · LM Studio: http://127.0.0.1:1234. Если в Ollama уже скачана модель, OLI подключится к ней сам — имя модели подставится автоматически."/>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                    <Button x:Name="EngineLlamaButton" Content="llama.cpp :8080" Click="EngineLlama_Click"
+                            Style="{StaticResource GhostButton}" Margin="0,0,8,0"/>
+                    <Button x:Name="EngineOllamaButton" Content="Ollama :11434" Click="EngineOllama_Click"
+                            Style="{StaticResource GhostButton}"/>
+                </StackPanel>
+                <TextBlock x:Name="EngineHintText" Style="{StaticResource Caption}" Margin="0,0,0,14" TextWrapping="Wrap" Text=""/>
+
                 <!-- ===== Model ===== -->
                 <TextBlock x:Name="ModelSectionText" Text="Модель" Style="{StaticResource SectionTitle}"/>
                 <ComboBox x:Name="ModelCombo" Style="{StaticResource FieldComboBox}" Margin="0,0,0,6"

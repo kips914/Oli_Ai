@@ -24,6 +24,9 @@ public partial class SettingsWindow : Window
 
     public bool RestartRequested { get; private set; }
 
+    /// <summary>Raised with the new llama.cpp / Ollama address when the user edits it.</summary>
+    public event Action<string>? EngineUrlChanged;
+
     public SettingsWindow(OliSettings settings)
     {
         InitializeComponent();
@@ -31,6 +34,8 @@ public partial class SettingsWindow : Window
         _selectedLanguage = settings.Language;
         _initializing = true;
 
+        // _initializing is already true, so this assignment does not fire EngineUrlChanged.
+        EngineUrlBox.Text = settings.LlamaBaseUrl;
         FastMode.IsChecked = settings.Mode == GenerationMode.Fast;
         PerformanceMode.IsChecked = settings.Mode == GenerationMode.Performance;
         ContextSlider.Value = Math.Clamp(settings.ContextSize, 2048, 32768);
@@ -65,6 +70,23 @@ public partial class SettingsWindow : Window
         LanguageCombo.SelectedValue = _selectedLanguage;
         _initializing = false;
     }
+
+    private void EngineUrl_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_initializing) return;
+        var url = EngineUrlBox.Text.Trim();
+        if (url.Length == 0) return;
+        if (!url.StartsWith("http://") && !url.StartsWith("https://")) url = "http://" + url;
+        _settings.LlamaBaseUrl = url.TrimEnd('/');
+        EngineUrlChanged?.Invoke(_settings.LlamaBaseUrl);
+        EngineHintText.Text = "Сохранено: " + _settings.LlamaBaseUrl + " — перезапустите OLI, чтобы ответы пошли через этот адрес.";
+    }
+
+    private void EngineLlama_Click(object sender, RoutedEventArgs e) =>
+        EngineUrlBox.Text = "http://127.0.0.1:8080";
+
+    private void EngineOllama_Click(object sender, RoutedEventArgs e) =>
+        EngineUrlBox.Text = "http://127.0.0.1:11434";
 
     private void UpdateModelDescription()
     {

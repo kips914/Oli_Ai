@@ -361,8 +361,25 @@ public partial class MainWindow : Window
     private async Task RefreshStatusAsync()
     {
         var alive = await _llama.IsAliveAsync();
-        StatusText.Text = alive ? Localization.T("status.connected") : Localization.T("status.serverMissing");
-        StatusDot.Fill = (Brush)Application.Current.Resources[alive ? "OnlineBrush" : "OfflineBrush"];
+        if (alive)
+        {
+            // Say which engine answers and which model it actually serves.
+            var served = await _llama.GetServedModelAsync();
+            var engine = _llama.IsOllama == true ? "Ollama" : "llama.cpp";
+            StatusText.Text = served is { Length: > 0 }
+                ? $"OLI: {engine} · {served}"
+                : Localization.T("status.connected");
+            StatusDot.Fill = (Brush)Application.Current.Resources["OnlineBrush"];
+            StatusText.ToolTip = $"{engine}: {_settings.LlamaBaseUrl}";
+            return;
+        }
+
+        // Nothing answers on the configured port — tell the user what to start, and where.
+        StatusText.Text = $"OLI: движок не отвечает на {_settings.LlamaBaseUrl}";
+        StatusText.ToolTip =
+            "Запустите движок модели: ollama serve (порт 11434) или scripts\\start-llama.ps1 (порт 8080). " +
+            "Адрес меняется в настройках: «Настройки» → движок.";
+        StatusDot.Fill = (Brush)Application.Current.Resources["OfflineBrush"];
     }
 
     private async Task CheckForUpdatesOnStartupAsync()
@@ -416,6 +433,12 @@ public partial class MainWindow : Window
         PersistSettings();
         var previousModel = _settings.ModelGguf;
         var window = new SettingsWindow(_settings) { Owner = this };
+        window.EngineUrlChanged += url =>
+        {
+            OliLog.Info("ENGINE", $"Адрес движка: {url}");
+            _settings.LlamaBaseUrl = url;
+            // LlamaClient binds its HttpClient to the old address: restart OLI to apply.
+        };
 
         if (window.ShowDialog() != true) return;
 

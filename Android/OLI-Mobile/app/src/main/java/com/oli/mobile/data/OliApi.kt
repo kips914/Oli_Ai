@@ -91,7 +91,8 @@ class OliApi private constructor() {
                     version = json.optString("version"),
                     registration = json.optBoolean("registration", true),
                     llama = json.optBoolean("llama", false),
-                    viaInternet = target.startsWith("https://")
+                    viaInternet = target.startsWith("https://"),
+                    engine = json.optString("engine")
                 )
             } finally {
                 conn.disconnect()
@@ -150,6 +151,8 @@ class OliApi private constructor() {
                 "Адрес не найден. Ссылка на туннель живёт только пока OLI на ПК открыт — скопируйте свежий код подключения."
             raw.contains("cleartext") ->
                 "Android заблокировал незащищённое соединение — используйте адрес, который начинается с https://"
+            raw.contains("движок") || raw.contains("модель «") || raw.contains("не найдена на") ->
+                error?.message ?: "Модель на ПК не отвечает — запустите движок модели."
             raw.contains("401") -> "Неверный логин или пароль."
             else -> "Сервер не отвечает. Проверьте, что OLI на ПК открыт, и попробуйте снова."
         }
