@@ -875,6 +875,10 @@ public partial class MainWindow : Window
 
     private void AddConsoleEntry(OliLogEntry entry)
     {
+        // Cyrillic must survive the font: WPF's default console font (Consolas) has the
+        // glyphs, but a missing fallback shows "?" — keep the list on Segoe UI.
+        if (ConsoleList.FontFamily is null || ConsoleList.FontFamily.Source.StartsWith("Cascadia Mono", StringComparison.Ordinal))
+            ConsoleList.FontFamily = new System.Windows.Media.FontFamily("Consolas, Segoe UI");
         ConsoleList.Items.Add($"[{entry.Time:HH:mm:ss}] {entry.Level.ToString().ToUpperInvariant(),-7} {entry.Source,-10} {entry.Message}");
         if (ConsoleAutoScroll.IsChecked == true && ConsoleList.Items.Count > 0)
             ConsoleList.ScrollIntoView(ConsoleList.Items[^1]);
