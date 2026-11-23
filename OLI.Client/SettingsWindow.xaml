@@ -18,7 +18,7 @@
                        Margin="0,4,0,0" Text="Модель, память, внешний вид и обслуживание"/>
         </StackPanel>
 
-        <ScrollViewer Grid.Row="1" Style="{StaticResource ThinScrollViewer}" VerticalScrollBarVisibility="Auto">
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="0,0,8,0">
 
                 <!-- ===== Model ===== -->

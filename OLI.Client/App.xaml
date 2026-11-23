@@ -1,7 +1,6 @@
 <Application x:Class="OLI.Client.App"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    StartupUri="MainWindow.xaml">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Application.Resources>
         <ResourceDictionary>
 
@@ -86,15 +85,10 @@
                     </Setter.Value>
                 </Setter>
             </Style>
-            <Style TargetType="ScrollViewer" x:Key="ThinScrollViewer">
-                <Setter Property="Resources">
-                    <Setter.Value>
-                        <ResourceDictionary>
-                            <Style TargetType="ScrollBar" BasedOn="{StaticResource ThinScrollBar}"/>
-                        </ResourceDictionary>
-                    </Setter.Value>
-                </Setter>
-            </Style>
+            <!-- Implicit style: every scrollbar in the app is thin.
+                 NOTE: never use <Setter Property="Resources"/> here - Resources is not a
+                 DependencyProperty and such a setter crashes the BAML loader on startup. -->
+            <Style TargetType="ScrollBar" BasedOn="{StaticResource ThinScrollBar}"/>
 
             <!-- ============================ Text helpers ============================ -->
             <Style x:Key="H1" TargetType="TextBlock">
@@ -123,13 +117,6 @@
                 <Setter Property="AcceptsReturn" Value="True"/>
                 <Setter Property="TextWrapping" Value="Wrap"/>
                 <Setter Property="VerticalScrollBarVisibility" Value="Auto"/>
-                <Setter Property="Resources">
-                    <Setter.Value>
-                        <ResourceDictionary>
-                            <Style TargetType="ScrollBar" BasedOn="{StaticResource ThinScrollBar}"/>
-                        </ResourceDictionary>
-                    </Setter.Value>
-                </Setter>
             </Style>
 
             <Style x:Key="FieldTextBox" TargetType="TextBox">
@@ -225,7 +212,7 @@
                                        IsOpen="{TemplateBinding IsDropDownOpen}" Focusable="False" PopupAnimation="Fade">
                                     <Border Background="{StaticResource BgElevatedBrush}" CornerRadius="10" Margin="0,4,0,0"
                                             BorderBrush="{StaticResource BorderBrush2}" BorderThickness="1" MinWidth="{TemplateBinding ActualWidth}">
-                                        <ScrollViewer MaxHeight="280" Style="{StaticResource ThinScrollViewer}">
+                                        <ScrollViewer MaxHeight="280">
                                             <ItemsPresenter/>
                                         </ScrollViewer>
                                     </Border>

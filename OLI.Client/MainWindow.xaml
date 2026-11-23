@@ -165,8 +165,7 @@
             <Grid Grid.Row="1">
                 <!-- CHAT -->
                 <Border x:Name="ChatPage" Style="{StaticResource Card}">
-                    <ScrollViewer x:Name="ChatScroll" Padding="20" VerticalScrollBarVisibility="Auto"
-                                  Style="{StaticResource ThinScrollViewer}">
+                    <ScrollViewer x:Name="ChatScroll" Padding="20" VerticalScrollBarVisibility="Auto">
                         <ItemsControl x:Name="ChatList" ItemTemplate="{StaticResource ChatBubbleTemplate}"/>
                     </ScrollViewer>
                 </Border>
@@ -266,7 +265,7 @@
 
                 <!-- WEB SEARCH -->
                 <Border x:Name="WebPage" Style="{StaticResource Card}" Padding="20" Visibility="Collapsed">
-                    <ScrollViewer Style="{StaticResource ThinScrollViewer}" VerticalScrollBarVisibility="Auto">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <StackPanel MaxWidth="720" HorizontalAlignment="Left">
                             <TextBlock Text="Поиск в интернете" Style="{StaticResource H1}"/>
                             <TextBlock Style="{StaticResource Caption}" Margin="0,6,0,18"
@@ -327,7 +326,7 @@
 
                 <!-- TELEGRAM -->
                 <Border x:Name="TelegramPage" Style="{StaticResource Card}" Padding="20" Visibility="Collapsed">
-                    <ScrollViewer Style="{StaticResource ThinScrollViewer}" VerticalScrollBarVisibility="Auto">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <StackPanel MaxWidth="720" HorizontalAlignment="Left">
                             <TextBlock Text="Telegram-бот" Style="{StaticResource H1}"/>
                             <TextBlock Style="{StaticResource Caption}" Margin="0,6,0,18"
@@ -389,7 +388,7 @@
 
                 <!-- SERVER / ADMIN -->
                 <Border x:Name="AdminPage" Style="{StaticResource Card}" Padding="20" Visibility="Collapsed">
-                    <ScrollViewer Style="{StaticResource ThinScrollViewer}" VerticalScrollBarVisibility="Auto">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <StackPanel MaxWidth="720" HorizontalAlignment="Left">
                             <TextBlock Text="Сервер для телефона" Style="{StaticResource H1}"/>
                             <TextBlock Style="{StaticResource Caption}" Margin="0,6,0,18"

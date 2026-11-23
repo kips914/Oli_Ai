@@ -16,6 +16,27 @@ public partial class App : Application
         {
             if (args.ExceptionObject is Exception ex) OliLog.Error("APP", ex.ToString());
         };
+
+        // Startup window is created by hand (no StartupUri) so that a broken resource
+        // dictionary or a missing file shows a readable message instead of a silent crash.
+        try
+        {
+            var window = new MainWindow();
+            MainWindow = window;
+            window.Show();
+        }
+        catch (Exception ex)
+        {
+            OliLog.Error("APP", "MainWindow failed to load:\n" + ex);
+            MessageBox.Show(
+                "OLI не смог открыть главное окно.\n\n" +
+                $"{ex.GetType().Name}: {ex.Message}\n\n" +
+                $"Подробности в логе: {Path.Combine(AppPaths.LogsRoot, "oli.log")}",
+                "OLI", MessageBoxButton.OK, MessageBoxImage.Error);
+            Shutdown(1);
+            return;
+        }
+
         base.OnStartup(e);
     }
 
