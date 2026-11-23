@@ -197,7 +197,7 @@ private fun OliScreen(
         .fillMaxSize()
         .pointerInput(screen, filesPath) {
             var total = 0f
-            androidx.compose.foundation.gestures.detectHorizontalDragGestures(
+            detectHorizontalDragGestures(
                 onDragStart = { total = 0f },
                 onDragEnd = {
                     if (total > 100f && screen != Screen.Chat) {

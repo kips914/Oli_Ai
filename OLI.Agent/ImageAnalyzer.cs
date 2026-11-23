@@ -103,7 +103,7 @@ public static class ImageAnalyzer
             {
                 var chunk = Encoding.ASCII.GetString(b, 12, 4);
                 if (chunk == "VP8X")
-                    return (24Bit(b, 24) + 1, 24Bit(b, 27) + 1);
+                    return (Le24(b, 24) + 1, Le24(b, 27) + 1);
                 if (chunk == "VP8 ")
                     return ((b[26] | (b[27] << 8)) & 0x3FFF, (b[28] | (b[29] << 8)) & 0x3FFF);
                 if (chunk == "VP8L")
@@ -184,5 +184,5 @@ public static class ImageAnalyzer
 
     private static int Be(byte[] b, int i) => (b[i] << 24) | (b[i + 1] << 16) | (b[i + 2] << 8) | b[i + 3];
     private static int Le(byte[] b, int i) => b[i] | (b[i + 1] << 8) | (b[i + 2] << 16) | (b[i + 3] << 24);
-    private static int 24Bit(byte[] b, int i) => b[i] | (b[i + 1] << 8) | (b[i + 2] << 16);
+    private static int Le24(byte[] b, int i) => b[i] | (b[i + 1] << 8) | (b[i + 2] << 16);
 }
