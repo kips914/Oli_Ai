@@ -86,8 +86,11 @@ class OliApi private constructor() {
             val conn = open("/api/health", "GET", null, null)
             try {
                 val json = JSONObject(read(conn))
+                // Same rule as ConnectionCore.Classify on the PC: "ok" alone is not enough,
+                // the answer must come from an OLI server.
+                val service = json.optString("service")
                 ServerHealth(
-                    ok = json.optString("status") == "ok",
+                    ok = json.optString("status") == "ok" && (service.isEmpty() || service == "oli-server"),
                     version = json.optString("version"),
                     registration = json.optBoolean("registration", true),
                     llama = json.optBoolean("llama", false),
@@ -116,13 +119,22 @@ class OliApi private constructor() {
      * Returns the server URL and the invite code, or null when the text is not a code.
      */
     fun parseJoinCode(text: String): Pair<String, String>? {
-        var raw = text.trim()
+        val raw = text.trim()
         if (raw.isEmpty()) return null
-        // Accept the code with whitespace/newlines pasted from a messenger.
-        raw = raw.filterNot { it.isWhitespace() }.removePrefix("oli://").removePrefix("OLI://")
-        if (!raw.startsWith("OLI1") && raw.length < 12) return null
+
+        // A plain address is accepted too: "192.168.1.10:6767", "https://x.trycloudflare.com".
+        val looksLikeUrl = raw.contains("://") ||
+            raw.matches(Regex("^[A-Za-z0-9._-]+(:\\d{1,5})?$"))
+        if (looksLikeUrl) {
+            val address = normalize(raw)
+            return if (address.isBlank()) null else address to ""
+        }
+
+        val code = raw.filterNot { it.isWhitespace() }
+            .removePrefix("oli://").removePrefix("OLI://")
+        if (!code.startsWith("OLI1")) return null
         return try {
-            val padded = raw.replace('-', '+').replace('_', '/').let {
+            val padded = code.replace('-', '+').replace('_', '/').let {
                 when (it.length % 4) {
                     2 -> "$it=="
                     3 -> "$it="
@@ -132,7 +144,7 @@ class OliApi private constructor() {
             val decoded = String(android.util.Base64.decode(padded, android.util.Base64.DEFAULT), Charsets.UTF_8)
             val parts = decoded.split('|')
             if (parts.size < 2 || parts[0] != "OLI1" || parts[1].isBlank()) null
-            else parts[1].trimEnd('/') to parts.getOrElse(2) { "" }
+            else normalize(parts[1]) to parts.getOrElse(2) { "" }
         } catch (_: Exception) {
             null
         }
@@ -145,15 +157,17 @@ class OliApi private constructor() {
         val hint = when {
             raw.contains("failed to connect") || raw.contains("connection refused") ||
                 raw.contains("econnrefused") || raw.contains("timeout") || raw.contains("timed out") ->
-                "Компьютер не ответил. Чаще всего это брандмауэр Windows: на ПК откройте «Пульт админа» → " +
-                    "«🛡 Открыть порт» (или нажмите «🌍 Дам доступ из интернета» — работает и на мобильном интернете). " +
-                    "Если вы не дома — вставьте код подключения."
+                "Компьютер не ответил. Дома: на ПК «Пульт админа» → «🛡 Открыть порт» (частая причина — " +
+                    "брандмауэр Windows). Не дома: «🌍 Дам доступ из интернета» и вставьте код подключения. " +
+                    "Проверить точную причину можно на ПК кнопкой «📱 Проверить путь телефона»."
             raw.contains("unknownhost") || raw.contains("unable to resolve") || raw.contains("nodename") ->
                 "Адрес не найден. Ссылка на туннель живёт только пока OLI на ПК открыт — скопируйте свежий код подключения."
             raw.contains("cleartext") ->
                 "Android заблокировал незащищённое соединение — используйте адрес, который начинается с https://"
             raw.contains("движок") || raw.contains("модель «") || raw.contains("не найдена на") ->
-                error?.message ?: "Модель на ПК не отвечает — запустите движок модели."
+                error?.message ?: "Модель на ПК не отвечает — запустите движок модели (Ollama: ollama serve)."
+            raw.contains("503") || raw.contains("пустой ответ") ->
+                error?.message ?: "Движок модели на ПК не отвечает — чат не может ответить."
             raw.contains("401") -> "Неверный логин или пароль."
             else -> "Сервер не отвечает. Проверьте, что OLI на ПК открыт, и попробуйте снова."
         }
@@ -222,30 +236,50 @@ class OliApi private constructor() {
 
     // ---------------------------------------------------------------- chat
 
+    /** Delays between chat attempts (ms): the same policy as the desktop client. */
+    private val chatDelays = longArrayOf(0L, 700L)
+
     suspend fun chat(message: String, threadId: String?): ChatReply {
         val body = JSONObject().put("message", message)
         if (!threadId.isNullOrBlank()) body.put("threadId", threadId)
-        val json = call("/api/chat", "POST", body)
+
+        // Retry only transport failures: a 503 (engine down) or 409 (deleted chat) is final.
+        var json: JSONObject? = null
+        var lastError: Exception? = null
+        for ((index, delay) in chatDelays.withIndex()) {
+            if (delay > 0) kotlinx.coroutines.delay(delay)
+            try {
+                json = call("/api/chat", "POST", body)
+                break
+            } catch (e: ApiException) {
+                if (e.code != 0 || index == chatDelays.lastIndex) throw e
+                lastError = e
+            } catch (e: Exception) {
+                if (index == chatDelays.lastIndex) throw lastError ?: e
+                lastError = e
+            }
+        }
+        val payload = json ?: throw (lastError ?: ApiException("Сервер не ответил."))
         val files = mutableListOf<String>()
-        json.optJSONArray("files")?.let { array ->
+        payload.optJSONArray("files")?.let { array ->
             for (i in 0 until array.length()) files.add(array.optString(i))
         }
-        json.optJSONObject("usage")?.let { u ->
+        payload.optJSONObject("usage")?.let { u ->
             UsageSnapshot.hourUsed = u.optLong("hourUsed")
             UsageSnapshot.hourLimit = u.optInt("hourLimit")
             UsageSnapshot.dayUsed = u.optLong("dayUsed")
             UsageSnapshot.dayLimit = u.optInt("dayLimit")
             UsageSnapshot.activeUsers = u.optInt("activeUsers", 1)
         }
-        UsageSnapshot.limited = json.optBoolean("limited")
-        UsageSnapshot.modelName = json.optString("model")
-        UsageSnapshot.modelId = json.optString("modelId")
+        UsageSnapshot.limited = payload.optBoolean("limited")
+        UsageSnapshot.modelName = payload.optString("model")
+        UsageSnapshot.modelId = payload.optString("modelId")
         return ChatReply(
-            text = json.optString("text"),
+            text = payload.optString("text"),
             files = files,
-            threadId = json.optString("threadId"),
-            limited = json.optBoolean("limited"),
-            modelName = json.optString("model")
+            threadId = payload.optString("threadId"),
+            limited = payload.optBoolean("limited"),
+            modelName = payload.optString("model")
         )
     }
 

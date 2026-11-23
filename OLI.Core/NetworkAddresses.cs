@@ -89,6 +89,31 @@ public static class NetworkAddresses
 
     // ---------------------------------------------------------------- helpers
 
+    /// <summary>True when the address belongs to a VPN / virtual adapter (phones cannot use it).</summary>
+    public static bool IsVirtualAddress(string address)
+    {
+        var entry = LocalDetailed().FirstOrDefault(a => a.Address == address);
+        return entry?.IsVirtual ?? false;
+    }
+
+    /// <summary>
+    /// Subnet broadcast addresses (x.x.x.255 for a /24) — a locked-down Wi-Fi sometimes
+    /// drops 255.255.255.255 but still delivers the subnet broadcast, which is exactly
+    /// what the phone's beacon listener needs.
+    /// </summary>
+    public static List<IPAddress> BroadcastAddresses()
+    {
+        var result = new List<IPAddress>();
+        foreach (var entry in LocalDetailed())
+        {
+            var prefix = SubnetPrefix(entry.Address);
+            if (prefix is null) continue;
+            if (IPAddress.TryParse(prefix + "255", out var broadcast) && !result.Contains(broadcast))
+                result.Add(broadcast);
+        }
+        return result;
+    }
+
     /// <summary>The /24 prefix (e.g. "192.168.1.") of an address — used for LAN scanning.</summary>
     public static string? SubnetPrefix(string address)
     {

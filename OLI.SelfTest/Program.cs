@@ -293,6 +293,275 @@ Check("broken bytes still produce a description", () =>
 Check("description never leaks a stack trace", () =>
     !OLI.Agent.ImageAnalyzer.Describe("x.jpg", new byte[] { 0xFF, 0xD8, 0xFF }).Contains("Exception"));
 
+// ------------------------------------------------------------ connection core
+// One implementation decides "is this address usable" for the PC and the phone. These
+// checks pin the rules that used to differ between them.
+
+Console.WriteLine("ConnectionCore · normalize");
+Check("address without scheme gets http://",
+    () => ConnectionCore.Normalize("192.168.1.10:6767") == "http://192.168.1.10:6767");
+Check("trailing slash is removed",
+    () => ConnectionCore.Normalize("http://192.168.1.10:6767/") == "http://192.168.1.10:6767");
+Check("tunnel address keeps https and its port",
+    () => ConnectionCore.Normalize("https://quiet-river.trycloudflare.com") == "https://quiet-river.trycloudflare.com");
+Check("scheme default port is dropped",
+    () => ConnectionCore.Normalize("http://example.com:80") == "http://example.com");
+Check("explicit custom port survives",
+    () => ConnectionCore.Normalize("http://127.0.0.1:11434") == "http://127.0.0.1:11434");
+Check("host is lower-cased",
+    () => ConnectionCore.Normalize("HTTP://LOCALHOST:6767") == "http://localhost:6767");
+Check("garbage is rejected", () => ConnectionCore.Normalize("не адрес вовсе") is null);
+Check("empty is rejected", () => ConnectionCore.Normalize("   ") is null);
+Check("non-http scheme is rejected", () => ConnectionCore.Normalize("ftp://host/x") is null);
+Check("loopback is recognised", () => ConnectionCore.IsLoopback("http://127.0.0.1:6767"));
+Check("localhost is recognised", () => ConnectionCore.IsLoopback("localhost:8080"));
+Check("LAN address is not loopback", () => !ConnectionCore.IsLoopback("http://192.168.1.5:6767"));
+
+Console.WriteLine("ConnectionCore · candidates");
+Check("candidate list removes duplicates",
+    () => ConnectionCore.CandidateOrder(["http://a:1", "http://a:1/", "http://b:2"]).Count == 2);
+Check("candidate list keeps the given order",
+    () => ConnectionCore.CandidateOrder(["http://b:2", "http://a:1"]).First() == "http://b:2");
+Check("invalid candidates are dropped",
+    () => ConnectionCore.CandidateOrder([null, "", "http://ok:1"]).SequenceEqual(["http://ok:1"]));
+
+Console.WriteLine("ConnectionCore · join code");
+Check("join code round-trips address and invite",
+    () => ConnectionCore.ParseJoinCode(ConnectionCore.BuildJoinCode("https://x.trycloudflare.com", "SEC-42"))
+        is { Address: "https://x.trycloudflare.com", InviteCode: "SEC-42", FromCode: true });
+Check("join code survives whitespace pasted from a messenger", () =>
+{
+    var code = ConnectionCore.BuildJoinCode("http://192.168.1.10:6767", "");
+    var messy = " " + code[..10] + "\n  " + code[10..] + " ";
+    return ConnectionCore.ParseJoinCode(messy)?.Address == "http://192.168.1.10:6767";
+});
+Check("join code tolerates the oli:// prefix",
+    () => ConnectionCore.ParseJoinCode("oli://" + ConnectionCore.BuildJoinCode("http://a:1")).FromCode);
+Check("plain address is accepted instead of a code",
+    () => ConnectionCore.ParseJoinCode("192.168.1.10:6767") == new JoinCodeInfo("http://192.168.1.10:6767", "", false));
+Check("plain https address is accepted",
+    () => ConnectionCore.ParseJoinCode("https://x.trycloudflare.com")?.Address == "https://x.trycloudflare.com");
+Check("garbage is not a join code", () => ConnectionCore.ParseJoinCode("hello world") is null);
+Check("broken base64 is not a join code", () => ConnectionCore.ParseJoinCode("OLI1@@@") is null);
+
+Console.WriteLine("ConnectionCore · health classification");
+Check("healthy server with live engine is Ready",
+    () => ConnectionCore.Classify(true, "oli-server", true, true) == ConnectionState.Ready);
+Check("live server with dead engine is EngineDown, not Ready",
+    () => ConnectionCore.Classify(true, "oli-server", false, true) == ConnectionState.EngineDown);
+Check("silent address is ServerDown",
+    () => ConnectionCore.Classify(false, null, null, null) == ConnectionState.ServerDown);
+Check("another service is NotOli",
+    () => ConnectionCore.Classify(true, "nginx", true, false) == ConnectionState.NotOli);
+Check("state sentences mention the engine when it is down",
+    () => ConnectionCore.Describe(ConnectionState.EngineDown, "http://a:1").Contains("движок"));
+Check("Every state has its own sentence", () =>
+    Enum.GetValues<ConnectionState>().All(s => ConnectionCore.Describe(s).Length > 10));
+Check("ServerDown sentence tells the user what to press",
+    () => ConnectionCore.Describe(ConnectionState.ServerDown, "http://a:1").Contains("Открыть порт"));
+
+Console.WriteLine("ConnectionCore · beacon");
+Check("beacon round-trips port and name", () =>
+{
+    var info = ConnectionCore.Beacon.Decode(ConnectionCore.Beacon.Encode(6767, "DESKTOP-1", "1.13.0"));
+    return info is { Port: 6767, Name: "DESKTOP-1", Version: "1.13.0" };
+});
+Check("beacon name cannot break the packet",
+    () => ConnectionCore.Beacon.Decode(ConnectionCore.Beacon.Encode(8765, "a|b", "1"))?.Name == "ab");
+Check("foreign udp packet is ignored", () => ConnectionCore.Beacon.Decode("hello"u8.ToArray()) is null);
+Check("beacon with a bad port is ignored",
+    () => ConnectionCore.Beacon.Decode("OLI-BEACON/2|99999|x|1"u8.ToArray()) is null);
+
+Console.WriteLine("RetryPolicy");
+Check("503 is not retried (engine is down, waiting will not help)",
+    () => !RetryPolicy.ShouldRetry(503, timeout: false));
+Check("429 is retried", () => RetryPolicy.ShouldRetry(429, timeout: false));
+Check("transport failure is retried", () => RetryPolicy.ShouldRetry(null, timeout: false));
+Check("401 is not retried", () => !RetryPolicy.ShouldRetry(401, timeout: false));
+
+// ------------------------------------------------------------ chat core
+
+Console.WriteLine("ChatCore · text");
+Check("control characters are stripped",
+    () => ChatCore.Clean("a\u0007b") == "ab");
+Check("newlines survive", () => ChatCore.Clean("a\nb") == "a\nb");
+Check("text is trimmed", () => ChatCore.Clean("  hi  ") == "hi");
+Check("null-safe clean", () => ChatCore.Clean(null!) == "");
+Check("long text is capped",
+    () => ChatCore.Clean(new string('x', ChatCore.MaxTextPerMessage + 500)).Length <= ChatCore.MaxTextPerMessage + 1);
+
+Console.WriteLine("ChatCore · titles");
+Check("title comes from the first message",
+    () => ChatCore.MakeTitle("Как решить интеграл?") == "Как решить интеграл");
+Check("long title is cut with an ellipsis",
+    () => ChatCore.MakeTitle(new string('a', 200)).EndsWith("…"));
+Check("empty message keeps the fallback", () => ChatCore.MakeTitle("   ") == "Новый чат");
+Check("newline in the first message does not break the title",
+    () => !ChatCore.MakeTitle("first line\nsecond line").Contains('\n'));
+
+Console.WriteLine("ChatCore · history for the model");
+Check("failures are not sent to the model",
+    () => ChatCore.ToModelHistory([ChatEntry.User("hi"), ChatEntry.Failure("boom")]).Count == 1);
+Check("pending bubbles are not sent",
+    () => ChatCore.ToModelHistory([ChatEntry.User("hi"), ChatEntry.PendingAnswer()]).Count == 1);
+Check("system messages are not sent",
+    () => ChatCore.ToModelHistory([new ChatEntry { Role = ChatRole.System, Text = "sys" }]).Count == 0);
+Check("failure messages are not sent",
+    () => ChatCore.ToModelHistory([ChatEntry.Failure("сеть недоступна"), ChatEntry.User("hi")]).Count == 1);
+Check("newest messages win",
+    () => ChatCore.ToModelHistory(Enumerable.Range(0, 100).Select(i => ChatEntry.User("m" + i)).ToList()).Last().Content == "m99");
+Check("history order is chronological", () =>
+{
+    var history = ChatCore.ToModelHistory([ChatEntry.User("one"), ChatEntry.Assistant("two")]);
+    return history[0].Content == "one" && history[1].Content == "two" && history[1].Role == "assistant";
+});
+
+Console.WriteLine("ChatCore · visible text");
+Check("empty assistant answer is explained, not hidden",
+    () => ChatCore.VisibleText(ChatEntry.Assistant("")).Contains("Пустой ответ"));
+Check("error bubble starts with a warning sign",
+    () => ChatCore.VisibleText(ChatEntry.Failure("нет движка")).StartsWith("⚠"));
+Check("pending bubble has no text", () => ChatCore.VisibleText(ChatEntry.PendingAnswer()) == "");
+Check("failures are not persisted", () => !ChatCore.IsPersistable(ChatEntry.Failure("x")));
+Check("pending answers are not persisted", () => !ChatCore.IsPersistable(ChatEntry.PendingAnswer()));
+
+Console.WriteLine("ChatCore · trim");
+Check("short history is untouched", () => ChatCore.Trim([ChatEntry.User("a")]).Count == 1);
+Check("long history keeps the cap", () =>
+    ChatCore.Trim(Enumerable.Range(0, ChatCore.MaxMessagesPerThread + 50).Select(i => ChatEntry.User("m" + i)).ToList())
+        .Count == ChatCore.MaxMessagesPerThread);
+Check("trim keeps the first user message (the title source)", () =>
+{
+    var messages = new List<ChatEntry> { ChatEntry.User("первый вопрос") };
+    messages.AddRange(Enumerable.Range(0, ChatCore.MaxMessagesPerThread + 10).Select(i => ChatEntry.Assistant("a" + i)));
+    var trimmed = ChatCore.Trim(messages);
+    return trimmed[0].Text == "первый вопрос" && trimmed.Count == ChatCore.MaxMessagesPerThread;
+});
+
+// ------------------------------------------------------------ chat store (server)
+
+Console.WriteLine("ChatStore");
+var chatRoot = Path.Combine(Path.GetTempPath(), "oli-chats-" + Guid.NewGuid().ToString("N"));
+var store = new OLI.Server.Chats.ChatStore(chatRoot);
+var firstThread = store.Create("acc1", "Первый вопрос про интегралы", "oli-pass");
+Check("created thread is listed", () => store.List("acc1").Any(t => t.Id == firstThread.Id));
+Check("title is taken from the first message",
+    () => store.List("acc1").First().Title.StartsWith("Первый вопрос"));
+Check("append returns the stored entry with a server id", () =>
+    store.Append("acc1", firstThread.Id, ChatEntry.User("hello")) is { Text: "hello" } stored && stored.Id.Length > 0);
+Check("append to a deleted thread returns null",
+    () => store.Append("acc1", "missing", ChatEntry.Assistant("x")) is null);
+Check("messages are persisted and reloaded", () =>
+{
+    var reloaded = new OLI.Server.Chats.ChatStore(chatRoot);
+    return reloaded.Get("acc1", firstThread.Id)?.Messages.Count >= 1;
+});
+Check("parallel appends from two threads do not lose messages", () =>
+{
+    var thread = store.Create("acc1", "parallel", "oli-pass");
+    Parallel.For(0, 40, i => store.Append("acc1", thread.Id, ChatEntry.Assistant("m" + i)));
+    return store.Get("acc1", thread.Id)?.Messages.Count == 40;
+});
+Check("second thread is listed first (newest on top)", () =>
+{
+    var first = store.Create("acc3", "старый", "oli-pass");
+    Thread.Sleep(5);
+    var second = store.Create("acc3", "новый", "oli-pass");
+    return store.List("acc3")[0].Id == second.Id && store.Latest("acc3")?.Id == second.Id;
+});
+Check("renaming updates the drawer title", () =>
+    store.Rename("acc1", firstThread.Id, "Новое имя") && store.List("acc1").First(t => t.Id == firstThread.Id).Title == "Новое имя");
+Check("delete removes the thread", () => store.Delete("acc1", firstThread.Id) && store.Get("acc1", firstThread.Id) is null);
+Check("accounts are isolated", () => store.List("acc2").Count == 0);
+Check("thread titles are trimmed to one line", () =>
+{
+    var thread = store.Create("acc4", "первая строка\nвторая строка", "oli-pass");
+    var title = store.List("acc4").First(t => t.Id == thread.Id).Title;
+    return !title.Contains('\n') && title.StartsWith("первая строка");
+});
+Check("missing title falls back to 'Новый чат'", () =>
+    store.Create("acc5", "", "oli-pass").Title == "Новый чат");
+Check("thread history is capped, not unbounded", () =>
+{
+    var thread = store.Create("acc6", "cap", "oli-pass");
+    for (var i = 0; i < ChatCore.MaxMessagesPerThread + 20; i++)
+        store.Append("acc6", thread.Id, ChatEntry.User("m" + i));
+    return store.Get("acc6", thread.Id)!.Messages.Count == ChatCore.MaxMessagesPerThread;
+});
+Check("latest thread is returned for 'current chat'",
+    () => store.Latest("acc1") is not null);
+try { Directory.Delete(chatRoot, true); } catch { }
+
+// ------------------------------------------------------------ live server round-trip
+// Start the real OLI server on a free port and walk the exact phone path:
+// health → register → login → chat thread → drawer → rename → delete. The model engine
+// is definitely absent here, so the chat must answer 503 with a reason (not 500).
+
+Console.WriteLine("Live server round-trip");
+var livePort = FreePort();
+var liveRoot = Path.Combine(Path.GetTempPath(), "oli-live-" + Guid.NewGuid().ToString("N"));
+await using (var live = new OLI.Server.ServerHost(new OLI.Server.ServerOptions
+{
+    DataRoot = liveRoot,
+    Host = "127.0.0.1",
+    Port = livePort,
+    LlamaBaseUrl = "http://127.0.0.1:9", // nothing listens here on purpose
+    AllowRegistration = true,
+    AdminToken = "selftest-admin",
+}))
+{
+    await live.StartAsync();
+    using var client = new OLI.Engine.OliServerClient($"http://127.0.0.1:{livePort}");
+
+    var probe = await client.ProbeAsync();
+    Check("live health says the engine is down, not 'unknown'",
+        () => probe.State == ConnectionState.EngineDown);
+    Check("live health names the engine", () => probe.Engine.Length > 0);
+
+    var register = await client.RegisterAsync("student01", "Study2026", "Студент", "", default);
+    Check("registration succeeds", () => register.Ok && register.Token is not null);
+    client.Token = register.Token;
+
+    var duplicate = await client.RegisterAsync("student01", "Study2026", "Студент", "", default);
+    Check("duplicate registration is refused with a reason", () => !duplicate.Ok && duplicate.Error.Length > 0);
+
+    var badLogin = await new OLI.Engine.OliServerClient($"http://127.0.0.1:{livePort}")
+        .LoginAsync("student01", "wrong-password1", default);
+    Check("wrong password is a 401, not a retry loop", () => !badLogin.Ok && badLogin.HttpStatus == 401);
+
+    var login = await new OLI.Engine.OliServerClient($"http://127.0.0.1:{livePort}")
+        .LoginAsync("student01", "Study2026", default);
+    Check("login returns a fresh token", () => login.Ok && login.Token is not null);
+
+    var emptyChat = await client.SendAsync("Как дела?", null, default);
+    Check("chat without an engine returns 503 with a sentence", () =>
+        !emptyChat.Ok && emptyChat.HttpStatus == 503 && emptyChat.EngineDown && emptyChat.Error.Contains("модель", StringComparison.OrdinalIgnoreCase));
+
+    var threads = await client.ListChatsAsync();
+    Check("the failed turn still created (and titled) a thread", () =>
+        threads.Count == 1 && threads[0].Title.StartsWith("Как дела"));
+
+    var loaded = await client.LoadChatAsync(threads[0].Id);
+    Check("the user's message is stored once", () => loaded.Count(m => m.Role == ChatRole.User) == 1);
+    Check("no empty assistant bubble is stored", () => loaded.All(m => m.Role != ChatRole.Assistant || m.Text.Length > 0));
+
+    var unauthorised = new OLI.Engine.OliServerClient($"http://127.0.0.1:{livePort}");
+    Check("chat without a token is refused", () => !(await unauthorised.SendAsync("hi", null, default)).Ok);
+    Check("chats list without a token is empty, not an exception",
+        () => unauthorised.ListChatsAsync().GetAwaiter().GetResult().Count == 0);
+}
+
+try { Directory.Delete(liveRoot, true); } catch { }
+
+static int FreePort()
+{
+    var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+    listener.Start();
+    var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+    listener.Stop();
+    return port;
+}
+
 // ------------------------------------------------------------------ helpers
 
 static async Task<bool> ZipSlipBlocked(WorkspaceEngine workspace, string root)

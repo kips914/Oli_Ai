@@ -187,42 +187,14 @@ public sealed class TunnelManager : IDisposable
     // ------------------------------------------------------------- pairing code
 
     /// <summary>
-    /// Compact "join code" the student can type on the phone once:
-    /// <c>OLI1|https://xxx.trycloudflare.com|invite</c> → base64url. The phone unpacks it
-    /// and connects with one paste, so nobody has to retype a random public URL.
+    /// Compact "join code" the student can type on the phone once. The format lives in
+    /// <see cref="ConnectionCore"/> now, so the phone, the PC and the LAN path all agree.
     /// </summary>
-    public static string BuildPairCode(string publicUrl, string inviteCode)
-    {
-        var raw = $"OLI1|{publicUrl.TrimEnd('/')}|{inviteCode.Trim()}";
-        return ToBase64Url(System.Text.Encoding.UTF8.GetBytes(raw));
-    }
+    public static string BuildPairCode(string publicUrl, string inviteCode) =>
+        ConnectionCore.BuildJoinCode(publicUrl, inviteCode);
 
-    public static (string Url, string Invite)? ParsePairCode(string code)
-    {
-        try
-        {
-            var text = FromBase64Url(code.Trim());
-            var parts = text.Split('|');
-            if (parts.Length < 3 || parts[0] != "OLI1" || parts[1].Length == 0) return null;
-            // QR scanners sometimes return the code with an oli:// prefix.
-            return (parts[1], parts[2]);
-        }
-        catch { return null; }
-    }
-
-    private static string ToBase64Url(byte[] bytes) =>
-        Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
-
-    private static string FromBase64Url(string text)
-    {
-        var s = text.Replace('-', '+').Replace('_', '/');
-        switch (s.Length % 4)
-        {
-            case 2: s += "=="; break;
-            case 3: s += "="; break;
-        }
-        return System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(s));
-    }
+    public static (string Url, string Invite)? ParsePairCode(string code) =>
+        ConnectionCore.ParseJoinCode(code) is { } info ? (info.Address, info.InviteCode) : null;
 
     // ------------------------------------------------------------- internals
 

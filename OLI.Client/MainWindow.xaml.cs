@@ -31,6 +31,8 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<AllowedSite> _allowedSites;
     private readonly List<WorkspaceEntry> _workspaceEntries = [];
 
+    private LanBeacon? _beacon;
+    private readonly OliServerClient _phoneClient = new();
     private TelegramBot? _bot;
     private ServerHost? _serverHost;
     private ChatMessage? _streamingMessage;
@@ -93,6 +95,8 @@ public partial class MainWindow : Window
             OliLog.EntryAdded -= OnLogEntry;
             _ = _bot?.DisposeAsync();
             if (_serverHost is not null) _ = _serverHost.DisposeAsync();
+            _beacon?.Dispose();
+            _phoneClient.Dispose();
             _llama.Dispose();
             _web.Dispose();
             _updateService.Dispose();
@@ -809,6 +813,11 @@ public partial class MainWindow : Window
             _serverHost ??= CreateServerHost();
             await _serverHost.StartAsync();
 
+            // Tell the Wi-Fi (and the phone) that OLI is here, on whichever port is used.
+            _beacon?.Dispose();
+            _beacon = new LanBeacon(_settings.Server.Port, AppVersion.Current);
+            _beacon.Start();
+
             // A phone cannot reach a port that Windows Firewall blocks: open it right away.
             // Silent when the app is elevated; otherwise Windows shows its own prompt.
             var port = _settings.Server.Port;
@@ -839,6 +848,8 @@ public partial class MainWindow : Window
 
     private async Task StopServerAsync()
     {
+        _beacon?.Dispose();
+        _beacon = null;
         if (_serverHost is null) return;
         await _serverHost.StopAsync();
         _settings.Server.Enabled = false;

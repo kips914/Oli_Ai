@@ -46,8 +46,9 @@ public sealed class ServerHost : IAsyncDisposable
     private readonly MemoryStore _memory;
     private readonly UserProfileStore _profile;
     private readonly UsageStore _usage;
-    private readonly ChatHistoryStore _chats;
+    private readonly ChatStore _chats;
     private readonly LimitPolicy _limits;
+    private LanBeacon? _beacon;
 
     public ServerHost(ServerOptions options)
     {
@@ -63,7 +64,7 @@ public sealed class ServerHost : IAsyncDisposable
         _memory = new MemoryStore(Path.Combine(_options.DataRoot, "memory", "server.json"));
         _profile = new UserProfileStore(Path.Combine(_options.DataRoot, "memory", "profile.json"));
         _usage = new UsageStore(Path.Combine(_options.DataRoot, "usage", "tokens.json"));
-        _chats = new ChatHistoryStore(Path.Combine(_options.DataRoot, "chats"));
+        _chats = new ChatStore(Path.Combine(_options.DataRoot, "chats"));
         _limits = new LimitPolicy
         {
             SoloHourly = _options.SoloHourlyTokens,
@@ -126,6 +127,13 @@ public sealed class ServerHost : IAsyncDisposable
 
         await app.StartAsync(_cts.Token);
         _app = app;
+
+        // Presence packet for the phone: it carries the real port, so discovery works even
+        // when the PC uses 6767 instead of the default.
+        _beacon?.Dispose();
+        _beacon = new LanBeacon(_options.Port, AppVersion.Current);
+        _beacon.Start();
+
         Report($"сервер запущен на {_options.BaseUrl} (пользователей: {RegisteredUsers})");
     }
 
@@ -144,6 +152,8 @@ public sealed class ServerHost : IAsyncDisposable
         }
         finally
         {
+            _beacon?.Dispose();
+            _beacon = null;
             _app = null;
             _cts?.Dispose();
             _cts = null;
@@ -186,6 +196,10 @@ public sealed class ServerHost : IAsyncDisposable
             model = _options.Model,
             engine = _llama.IsOllama == true ? "ollama" : "llama.cpp",
             server = "oli-server",
+            // Discovery data for a phone that can already reach this address but wants to
+            // remember the port / name; harmless for older clients.
+            port = _options.Port,
+            name = Environment.MachineName,
         }));
 
         // ------------------------------------------------------------ auth
@@ -296,16 +310,10 @@ public sealed class ServerHost : IAsyncDisposable
 
             try
             {
-                // --- chat thread (the phone's "чаты" drawer)
-                var threadId = request.ThreadId;
-                ChatThread? thread = null;
-                if (!string.IsNullOrWhiteSpace(threadId)) thread = _chats.Get(account.Id, threadId);
-                if (thread is null)
-                {
-                    thread = _chats.Create(account.Id, text, modelId);
-                    threadId = thread.Id;
-                }
-                _chats.Append(account.Id, thread.Id, new StoredMessage { Role = "user", Text = text });
+                // --- chat thread: found, or created from this first message
+                var thread = _chats.GetOrCreate(account.Id, request.ThreadId, text, modelId);
+                var threadId = thread.Id;
+                _chats.Append(account.Id, threadId, ChatEntry.User(text));
 
                 var session = GetSession(account);
                 session.SelectModel(modelId);
@@ -329,11 +337,10 @@ public sealed class ServerHost : IAsyncDisposable
                     }, statusCode: 503);
                 }
 
-                _chats.Append(account.Id, thread.Id, new StoredMessage
-                {
-                    Role = "assistant",
-                    Text = answer.Text,
-                });
+                // A deleted thread must not be resurrected by an answer that was in flight.
+                var stored = _chats.Append(account.Id, threadId, ChatEntry.Assistant(answer.Text, answer.FilesToSend));
+                if (stored is null)
+                    return Results.Json(new { error = "Чат был удалён, ответ не сохранён.", deleted = true }, statusCode: 409);
 
                 var completionTokens = TokenEstimator.Estimate(answer.Text);
                 _usage.Add(new UsageEntry
@@ -352,7 +359,7 @@ public sealed class ServerHost : IAsyncDisposable
                     model = modelId == _options.LiteModel ? "Olim Son" : "Olim Pass",
                     modelId,
                     limited = exhausted,
-                    threadId = thread!.Id,
+                    threadId,
                     usage = new
                     {
                         prompt = promptTokens,
@@ -470,10 +477,11 @@ public sealed class ServerHost : IAsyncDisposable
                 chats = _chats.List(account.Id).Select(t => new
                 {
                     id = t.Id,
-                    title = t.TitleOrFallback,
+                    title = t.Title,
                     modelId = t.ModelId,
                     createdAt = t.CreatedAt,
                     updatedAt = t.UpdatedAt,
+                    messageCount = t.MessageCount,
                 }),
             });
         });
@@ -489,8 +497,26 @@ public sealed class ServerHost : IAsyncDisposable
                 id = thread.Id,
                 title = thread.TitleOrFallback,
                 modelId = thread.ModelId,
-                messages = thread.Messages.Select(m => new { role = m.Role, text = m.Text, at = m.At }),
+                messages = thread.Messages.Select(m => new
+                {
+                    id = m.Id,
+                    // "user" / "assistant" on the wire, ChatRole in code.
+                    role = m.Role == ChatRole.User ? "user" : "assistant",
+                    text = ChatCore.VisibleText(m),
+                    at = m.At,
+                    files = m.Files,
+                }),
             });
+        });
+
+        app.MapGet("/api/chats/latest", (HttpContext http) =>
+        {
+            var account = CurrentAccount(http);
+            if (account is null) return Unauthorized();
+            var thread = _chats.Latest(account.Id);
+            return thread is null
+                ? Results.Json(new { threadId = (string?)null })
+                : Results.Json(new { threadId = thread.Id, title = thread.TitleOrFallback });
         });
 
         app.MapPost("/api/chats", (NewChatRequest request, HttpContext http) =>

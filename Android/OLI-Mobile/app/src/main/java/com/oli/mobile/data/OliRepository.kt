@@ -3,6 +3,8 @@ package com.oli.mobile.data
 import android.content.Context
 import com.oli.mobile.BuildConfig
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -71,6 +73,16 @@ class OliRepository(private val context: Context) {
 
     private var nextId = 1L
 
+    /**
+     * Chat turns are serialised: the server rejects a second concurrent answer with 429,
+     * and a lost answer is worse than a short wait. The "typing" bubble stays visible
+     * while the mutex is held.
+     */
+    private val chatGate = Mutex()
+
+    /** Bumped on every chat switch, so a slow answer cannot land in the wrong thread. */
+    private var chatEpoch = 0L
+
     sealed interface Session {
         data object Loading : Session
         data object SignedOut : Session
@@ -134,9 +146,17 @@ class OliRepository(private val context: Context) {
             }
         }
 
-        // 2. Ask the local network.
+        // 2. Ask the local network: the UDP beacon carries the real port (6767, 8765, …).
         _discovering.value = true
         try {
+            for (server in BeaconScanner.find()) {
+                if (runCatching { api.health(server.url) }.getOrNull()?.ok == true) {
+                    selectOwnServer(server.url)
+                    return server.url
+                }
+            }
+
+            // 3. Last resort: subnet scan on the default port (networks without broadcast).
             val found = LanScanner.findServer(port = DEFAULT_PORT) ?: return null
             val normalized = found.trimEnd('/')
             val health = runCatching { api.health(normalized) }.getOrNull() ?: return null
@@ -158,12 +178,14 @@ class OliRepository(private val context: Context) {
         val parsed = api.parseJoinCode(code)
             ?: throw OliApi.ApiException("Это не похоже на код подключения OLI. Скопируйте строку из пульта администратора целиком.")
         val (url, invite) = parsed
+        // The address might be the LAN one typed by hand — keep it normalised.
+        val normalized = url.trimEnd('/')
         val health = try {
-            api.health(url)
+            api.health(normalized)
         } catch (e: Exception) {
-            throw OliApi.ApiException(api.explain(url, e))
+            throw OliApi.ApiException(api.explain(normalized, e))
         }
-        selectOwnServer(url)
+        selectOwnServer(normalized)
         if (invite.isNotBlank()) pendingInvite = invite
         return health
     }
@@ -375,7 +397,9 @@ class OliRepository(private val context: Context) {
 
     suspend fun send(text: String): String? {
         if (text.isBlank()) return null
-        _messages.value = _messages.value + ChatMessage(nextId++, fromUser = true, text = text.trim())
+        val clean = text.trim()
+        val epoch = chatEpoch
+        _messages.value = _messages.value + ChatMessage(nextId++, fromUser = true, text = clean)
 
         if (isDemo) {
             // View mode: acknowledge locally, never touch the network.
@@ -388,12 +412,26 @@ class OliRepository(private val context: Context) {
 
         _busy.value = true
         return try {
-            val reply = api.chat(text.trim(), _activeThread.value)
+            val reply = chatGate.withLock { api.chat(clean, _activeThread.value) }
+
+            // The user may have switched or deleted this chat while the answer was being
+            // generated: drop the answer instead of mixing two conversations together.
+            if (epoch != chatEpoch) return null
+
+            if (reply.text.isBlank()) {
+                _messages.value = _messages.value + ChatMessage(
+                    nextId++, fromUser = false,
+                    text = "⚠ Модель вернула пустой ответ — повторите вопрос или выберите другую модель."
+                )
+                return null
+            }
+
             _messages.value = _messages.value + ChatMessage(nextId++, fromUser = false, text = reply.text, files = reply.files)
             if (reply.threadId.isNotBlank() && _activeThread.value != reply.threadId) {
                 _activeThread.value = reply.threadId
-                refreshChats()
             }
+            // The server titles a thread from its first message, so the drawer must refresh.
+            refreshChats()
             _limitNotice.value = reply.limited
             refreshUsage()
             null
@@ -506,6 +544,7 @@ class OliRepository(private val context: Context) {
 
     /** Opens a saved conversation (or starts a fresh one when [threadId] is null). */
     suspend fun openChat(threadId: String?) {
+        chatEpoch++
         _activeThread.value = threadId
         if (isDemo || threadId.isNullOrBlank()) {
             _messages.value = emptyList()
@@ -519,6 +558,7 @@ class OliRepository(private val context: Context) {
     }
 
     suspend fun newChat(): String? {
+        chatEpoch++
         _activeThread.value = null
         _messages.value = emptyList()
         if (isDemo) return null
@@ -543,6 +583,7 @@ class OliRepository(private val context: Context) {
     suspend fun deleteChat(id: String): Boolean = try {
         api.deleteChat(id)
         if (_activeThread.value == id) {
+            chatEpoch++
             _activeThread.value = null
             _messages.value = emptyList()
         }

@@ -8,9 +8,14 @@
     <AssemblyName>OLI.SelfTest</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\OLI.Core\OLI.Core.csproj" />
     <ProjectReference Include="..\OLI.Workspace\OLI.Workspace.csproj" />
     <ProjectReference Include="..\OLI.Web\OLI.Web.csproj" />
     <ProjectReference Include="..\OLI.Agent\OLI.Agent.csproj" />
+    <ProjectReference Include="..\OLI.Engine\OLI.Engine.csproj" />
+    <ProjectReference Include="..\OLI.Server\OLI.Server.csproj" />
   </ItemGroup>
 </Project>

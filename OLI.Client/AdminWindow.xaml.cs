@@ -144,7 +144,11 @@ public partial class AdminWindow : Window
         }
     }
 
-    private void OnTunnelChanged() => Dispatcher.Invoke(RefreshTunnelState);
+    private void OnTunnelChanged()
+    {
+        _phoneReportShown = false;
+        Dispatcher.Invoke(RefreshTunnelState);
+    }
 
     private void RefreshTunnelState()
     {
@@ -157,11 +161,32 @@ public partial class AdminWindow : Window
             : _tunnel.StatusLine;
 
         var url = running ? _tunnel.PublicUrl : _tunnelSettings.LastPublicUrl;
-        TunnelPairText.Text = string.IsNullOrWhiteSpace(url)
-            ? ""
-            : "Код подключения для телефона (в приложении: Настройки → «Вставить код»):\n" + BuildPairCode(url);
+        var lines = new List<string>();
+        if (!string.IsNullOrWhiteSpace(url))
+        {
+            lines.Add("Код для телефона вне дома (" + (running ? "интернет-доступ работает" : "последний адрес") +
+                      "). В приложении: Настройки → «Вставить код»:");
+            lines.Add(BuildPairCode(url));
+        }
+        else
+        {
+            lines.Add("Код для телефона вне дома появится после «🌍 Дам доступ из интернета».");
+        }
 
-        if (TunnelLogText.Visibility == Visibility.Visible)
+        // Home Wi-Fi needs no code, but a code is still the fastest way to pair.
+        if (_host.IsRunning)
+        {
+            var lan = OLI.Core.NetworkAddresses.LocalDetailed()
+                .FirstOrDefault(a => a.IsWifiOrEthernet && !OLI.Core.NetworkAddresses.IsVirtualAddress(a.Address));
+            if (lan is not null)
+            {
+                lines.Add("");
+                lines.Add($"Дома (один Wi-Fi) код не обязателен: http://{lan.Address}:{_host.Options.Port}");
+            }
+        }
+        TunnelPairText.Text = string.Join(Environment.NewLine, lines);
+
+        if (TunnelLogText.Visibility == Visibility.Visible && !_phoneReportShown)
         {
             var lines = _tunnel.Log.TakeLast(3).ToList();
             TunnelLogText.Text = lines.Count == 0 ? "Журнал пуст." : string.Join(Environment.NewLine, lines);
@@ -170,6 +195,9 @@ public partial class AdminWindow : Window
         TunnelStopButton.IsEnabled = _tunnel.IsRunning;
         TunnelStartButton.IsEnabled = !_tunnel.IsRunning;
     }
+
+    /// <summary>Set while the phone-path report occupies the log area.</summary>
+    private bool _phoneReportShown;
 
     private string BuildPairCode(string url) =>
         TunnelManager.BuildPairCode(url, _host.Options.InviteCode);
@@ -214,6 +242,74 @@ public partial class AdminWindow : Window
         catch (Exception ex)
         {
             AdminMessageText.Text = "⚠ " + ex.Message;
+        }
+    }
+
+    // ------------------------------------------------------------- phone test
+
+    /// <summary>
+    /// Probes the server exactly like the phone does (health → auth → chat-ready) and
+    /// prints one line per step. This is the answer to "телефон не подключается":
+    /// the PC can now show whether the problem is the address, the firewall or the engine.
+    /// </summary>
+    private async void PhoneTest_Click(object sender, RoutedEventArgs e)
+    {
+        PhoneTestButton.IsEnabled = false;
+        AdminMessageText.Text = "Проверяю так же, как телефон…";
+        var lines = new List<string>();
+
+        try
+        {
+            var port = _host.Options.Port;
+            var local = OLI.Core.NetworkAddresses.LocalDetailed()
+                .Where(a => a.IsWifiOrEthernet)
+                .Select(a => a.Address)
+                .ToList();
+
+            lines.Add(_host.IsRunning ? $"1. Сервер: запущен на порту {port}" : $"1. Сервер: НЕ запущен (порт {port})");
+            lines.Add(OLI.Client.FirewallHelper.RuleExists(port)
+                ? $"2. Брандмауэр: порт {port} открыт"
+                : $"2. Брандмауэр: порт {port} ЗАКРЫТ — телефон по Wi-Fi не подключится");
+
+            // The real phone path: the LAN address, not 127.0.0.1.
+            using var client = new OLI.Engine.OliServerClient();
+            var candidates = local.Select(a => $"http://{a}:{port}").ToList();
+            if (candidates.Count == 0) lines.Add("3. Адреса Wi-Fi/Ethernet не найдены (нет сети)");
+
+            foreach (var candidate in candidates)
+            {
+                var probe = await client.ProbeAsync(candidate);
+                lines.Add($"3. {candidate} → {probe.Message}");
+            }
+
+            // No account: only the health part can be checked, which is exactly what
+            // makes the login screen show "сервер недоступен".
+            var login = await client.ProbeAsync($"http://127.0.0.1:{port}");
+            lines.Add($"4. Движок модели: {(login.State == OLI.Core.ConnectionState.Ready ? "работает" : "не отвечает")}" +
+                      (login.Engine.Length > 0 ? $" ({login.Engine})" : ""));
+
+            if (_tunnel.IsRunning && !string.IsNullOrWhiteSpace(_tunnel.PublicUrl))
+            {
+                var publicProbe = await client.ProbeAsync(_tunnel.PublicUrl);
+                lines.Add($"5. Интернет: {_tunnel.PublicUrl} → {publicProbe.Message}");
+            }
+            else
+            {
+                lines.Add("5. Интернет: доступ выключен (кнопка «🌍 Дам доступ из интернета»)");
+            }
+        }
+        catch (Exception ex)
+        {
+            lines.Add("⚠ " + ex.Message);
+        }
+        finally
+        {
+            PhoneTestButton.IsEnabled = true;
+            TunnelLogText.Visibility = Visibility.Visible;
+            TunnelLogButton.Content = "Скрыть журнал";
+            TunnelLogText.Text = string.Join(Environment.NewLine, lines);
+            _phoneReportShown = true;
+            AdminMessageText.Text = "Проверка пути телефона готова — подробности ниже.";
         }
     }
 
