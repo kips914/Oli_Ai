@@ -370,7 +370,7 @@ public sealed class ServerHost : IAsyncDisposable
             finally { gate.Release(); }
         });
 
-        app.MapGet("/api/models", (HttpContext http) =>
+        app.MapGet("/api/models", async (HttpContext http) =>
         {
             var account = CurrentAccount(http);
             if (account is null) return Unauthorized();
