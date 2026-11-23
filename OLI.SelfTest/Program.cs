@@ -16,12 +16,14 @@ void Check(string name, Func<bool> test)
     try
     {
         if (test()) { passes++; Console.WriteLine($"  ok   {name}"); }
-        else { failures.Add(name); Console.WriteLine($"  FAIL {name}"); }
+        else { failures.Add(name); Console.WriteLine($"  FAIL {name}"); Console.WriteLine($"::error title=SelfTest::{name}"); }
     }
     catch (Exception ex)
     {
         failures.Add($"{name} ({ex.GetType().Name}: {ex.Message})");
         Console.WriteLine($"  FAIL {name} — {ex.GetType().Name}: {ex.Message}");
+        // GitHub annotations survive even when the raw job log is unavailable.
+        Console.WriteLine($"::error title=SelfTest::{name} — {ex.GetType().Name}: {ex.Message.Replace("\n", " ")}");
     }
 }
 
@@ -30,12 +32,13 @@ async Task CheckAsync(string name, Func<Task<bool>> test)
     try
     {
         if (await test()) { passes++; Console.WriteLine($"  ok   {name}"); }
-        else { failures.Add(name); Console.WriteLine($"  FAIL {name}"); }
+        else { failures.Add(name); Console.WriteLine($"  FAIL {name}"); Console.WriteLine($"::error title=SelfTest::{name}"); }
     }
     catch (Exception ex)
     {
         failures.Add($"{name} ({ex.GetType().Name}: {ex.Message})");
         Console.WriteLine($"  FAIL {name} — {ex.GetType().Name}: {ex.Message}");
+        Console.WriteLine($"::error title=SelfTest::{name} — {ex.GetType().Name}: {ex.Message.Replace("\n", " ")}");
     }
 }
 
