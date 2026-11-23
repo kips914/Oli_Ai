@@ -167,7 +167,7 @@ public sealed class ServerHost : IAsyncDisposable
             service = "OLI Server",
             version = AppVersion.Current,
             api = 3,
-            models = new[] { ModelInfo(_options.Model, "k3.pass", "Olim Pass"), ModelInfo(_options.LiteModel, "k3.son", "Olim Son") },
+            models = new[] { ModelInfo(_options.Model, "oli-pass", "Olim Pass"), ModelInfo(_options.LiteModel, "oli-son", "Olim Son") },
             registration = _options.AllowRegistration,
             endpoints = new[] { "/api/health", "/api/register", "/api/login", "/api/me", "/api/chat", "/api/files" },
         }));
@@ -362,8 +362,8 @@ public sealed class ServerHost : IAsyncDisposable
                 selected,
                 models = new object[]
                 {
-                    ModelInfo(_options.Model, "k3.pass", "Olim Pass"),
-                    ModelInfo(_options.LiteModel, "k3.son", "Olim Son"),
+                    ModelInfo(_options.Model, "oli-pass", "Olim Pass"),
+                    ModelInfo(_options.LiteModel, "oli-son", "Olim Son"),
                 },
                 limit = new
                 {

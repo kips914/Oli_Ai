@@ -12,6 +12,11 @@ class OliRepository(private val context: Context) {
     private val api = OliApi.shared
     private val creds = CredentialStore.get(context)
 
+    companion object {
+        /** Default OLI server port (must match ServerSettings.Port on the PC). */
+        const val DEFAULT_PORT = 8765
+    }
+
     data class ChatMessage(val id: Long, val fromUser: Boolean, val text: String, val files: List<String> = emptyList())
 
     private val _session = MutableStateFlow<Session>(Session.Loading)
@@ -48,6 +53,10 @@ class OliRepository(private val context: Context) {
     /** True when the OLI (default) server could not be reached at startup. */
     private val _defaultServerOffline = MutableStateFlow(false)
     val defaultServerOffline: StateFlow<Boolean> = _defaultServerOffline.asStateFlow()
+
+    /** True while the app is searching the local network for the PC with the OLI server. */
+    private val _discovering = MutableStateFlow(false)
+    val discovering: StateFlow<Boolean> = _discovering.asStateFlow()
 
     private var nextId = 1L
 
@@ -96,6 +105,45 @@ class OliRepository(private val context: Context) {
         return health
     }
 
+    /**
+     * Looks for the OLI server on this Wi-Fi: remembered address first, then the whole
+     * local subnet. Fixes "сервер не виден", when the PC's IP changed or was never typed.
+     * Returns the address that answered, or null when nothing was found.
+     */
+    suspend fun findOwnServer(): String? {
+        // 1. The address that worked last time (the PC usually keeps it).
+        for (candidate in listOf(creds.customServer, creds.lastEndpoint)) {
+            if (candidate.isBlank()) continue
+            val normalized = candidate.trim().trimEnd('/')
+            if (runCatching { api.health(normalized) }.isSuccess) {
+                selectOwnServer(normalized)
+                return normalized
+            }
+        }
+
+        // 2. Ask the local network.
+        _discovering.value = true
+        try {
+            val found = LanScanner.findServer(port = DEFAULT_PORT) ?: return null
+            val normalized = found.trimEnd('/')
+            val health = runCatching { api.health(normalized) }.getOrNull() ?: return null
+            if (!health.ok) return null
+            selectOwnServer(normalized)
+            return normalized
+        } finally {
+            _discovering.value = false
+        }
+    }
+
+    /** Makes [url] the active own-PC server without re-probing it. */
+    private fun selectOwnServer(url: String) {
+        creds.serverMode = CredentialStore.MODE_CUSTOM
+        creds.customServer = url
+        creds.rememberEndpoint(url)
+        api.baseUrl = url
+        _defaultServerOffline.value = false
+    }
+
     /** Checks the default server; remembers its address when it answers. */
     suspend fun probeDefaultServer(): ServerHealth? {
         val candidates = buildList {
@@ -119,7 +167,26 @@ class OliRepository(private val context: Context) {
                 // try the next candidate
             }
         }
+
+        // Last resort: maybe this PC is running the OLI server right next to the phone.
+        _discovering.value = true
+        try {
+            val found = LanScanner.findServer(port = DEFAULT_PORT)
+            if (found != null) {
+                val health = runCatching { api.health(found) }.getOrNull()
+                if (health != null && health.ok) {
+                    api.baseUrl = found.trimEnd('/')
+                    creds.rememberEndpoint(found)
+                    _defaultServerOffline.value = false
+                    return health
+                }
+            }
+        } finally {
+            _discovering.value = false
+        }
+
         api.baseUrl = creds.lastEndpoint.ifBlank { BuildConfig.DEFAULT_SERVER }
+        _defaultServerOffline.value = true
         return null
     }
 

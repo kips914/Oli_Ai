@@ -84,6 +84,8 @@ public partial class MainWindow : Window
                 await StartBotAsync(silent: true);
             if (_settings.Server.AutoStartWithApp && _settings.Server.Enabled)
                 await StartServerAsync(silent: true);
+            else if (_settings.Server.AutoStartWithApp && !_settings.Server.Enabled)
+                OliLog.Info("SERVER", "Сервер не запускается автоматически: его выключили кнопкой «Остановить».");
             RefreshServerUi();
         };
         Closed += (_, _) =>
@@ -782,7 +784,22 @@ public partial class MainWindow : Window
             PersistSettings();
             _serverHost ??= CreateServerHost();
             await _serverHost.StartAsync();
+
+            // A phone cannot reach a port that Windows Firewall blocks: open it right away.
+            // Silent when the app is elevated; otherwise Windows shows its own prompt.
+            var port = _settings.Server.Port;
+            if (!FirewallHelper.RuleExists(port))
+            {
+                var firewall = await Task.Run(() => FirewallHelper.EnsurePortOpen(port));
+                if (firewall is null) OliLog.Info("SERVER", $"Порт {port} открыт в брандмауэре.");
+                else OliLog.Warning("SERVER", $"Брандмауэр: {firewall}");
+            }
+
             RefreshServerUi();
+            var address = NetworkInfo.PreferredAddress();
+            ServerStatusLine.Text += address is null
+                ? " · адрес для телефона не найден (нет Wi-Fi/Ethernet)"
+                : $" · телефону указывать http://{address}:{port}";
         }
         catch (Exception ex)
         {
@@ -834,9 +851,11 @@ public partial class MainWindow : Window
         ServerStopButton.IsEnabled = running;
 
         var address = NetworkInfo.PreferredAddress();
+        var allAddresses = NetworkInfo.LocalAddresses();
         ServerAddressLine.Text = running && address is not null
-            ? $"В приложении на телефоне укажите сервер: http://{address}:{_settings.Server.Port}" +
-              (FirewallHelper.RuleExists(_settings.Server.Port) ? "" : "  · нажмите «Открыть порт», если телефон не подключается")
+            ? $"Адрес для телефона: http://{address}:{_settings.Server.Port}" +
+              (allAddresses.Count > 1 ? $"   (ещё: {string.Join(", ", allAddresses.Where(a => a != address))})" : "") +
+              "  · в приложении кнопка «Найти мой ПК» находит сервер сама"
             : "Адрес для телефона появится после запуска (нужен Wi-Fi в той же сети или VPN).";
         ServerQuotaText.Text = TextExtractors.FormatSize((long)ServerQuotaSlider.Value * 1024 * 1024);
     }

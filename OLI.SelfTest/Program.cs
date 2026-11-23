@@ -242,6 +242,30 @@ Check("settings store writes and reads back", () =>
     return json.Contains("Qwen3.5-4B") && json.Contains("8192");
 });
 
+// ------------------------------------------------------------ LAN / pairing
+// The phone finds the PC by scanning its own subnet, so these helpers must be sane:
+// a wrong preferred address or a broken prefix makes "сервер не виден" again.
+
+Check("subnet prefix of a home address", () => NetworkAddresses.SubnetPrefix("192.168.1.42") == "192.168.1.");
+Check("subnet prefix of a 10.x address", () => NetworkAddresses.SubnetPrefix("10.0.5.7") == "10.0.5.");
+Check("APIPA address has no prefix", () => NetworkAddresses.SubnetPrefix("169.254.10.20") is null);
+Check("garbage address has no prefix", () => NetworkAddresses.SubnetPrefix("not-an-ip") is null);
+Check("localhost is never offered to the phone", () => !NetworkAddresses.Local().Contains("127.0.0.1"));
+Check("no APIPA address is offered to the phone", () => NetworkAddresses.Local().All(a => !a.StartsWith("169.254.")));
+Check("preferred address is one of the local ones",
+    () => NetworkAddresses.Preferred() is null || NetworkAddresses.Local().Contains(NetworkAddresses.Preferred()!));
+Check("address description is never empty",
+    () => !string.IsNullOrWhiteSpace(NetworkAddresses.DescribeAll()));
+
+await CheckAsync("LAN scan rejects a dead port quickly", async () =>
+{
+    var local = NetworkAddresses.Preferred();
+    if (local is null) return true; // offline CI: nothing to scan
+    var watch = System.Diagnostics.Stopwatch.StartNew();
+    var found = await LanScanner.FindServerAsync(local, port: 1, TimeSpan.FromMilliseconds(80));
+    return found is null && watch.Elapsed < TimeSpan.FromSeconds(30);
+});
+
 // ------------------------------------------------------------------ helpers
 
 static async Task<bool> ZipSlipBlocked(WorkspaceEngine workspace, string root)

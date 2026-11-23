@@ -60,6 +60,7 @@ fun SettingsScreen(
     var ownServer by remember { mutableStateOf(repo.usingOwnServer) }
     var serverField by remember { mutableStateOf(repo.customServer) }
     var status by remember { mutableStateOf<String?>(null) }
+    var searching by remember { mutableStateOf(false) }
     var confirmLogout by remember { mutableStateOf(false) }
     var confirmForget by remember { mutableStateOf(false) }
     var oldPassword by remember { mutableStateOf("") }
@@ -203,20 +204,48 @@ fun SettingsScreen(
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
             )
-            Button(
-                enabled = !demo,
-                onClick = {
-                    scope.launch {
-                        status = try {
-                            repo.useOwnServer(serverField)
-                            "Свой ПК доступен"
-                        } catch (e: Exception) {
-                            "Свой ПК не отвечает: ${e.message}"
+            Row(
+                Modifier.padding(top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    enabled = !demo,
+                    onClick = {
+                        scope.launch {
+                            status = try {
+                                repo.useOwnServer(serverField)
+                                "Свой ПК доступен"
+                            } catch (e: Exception) {
+                                "Свой ПК не отвечает: ${e.message}"
+                            }
                         }
                     }
-                },
-                modifier = Modifier.padding(top = 8.dp)
-            ) { Text("Проверить и сохранить") }
+                ) { Text("Проверить и сохранить") }
+                OutlinedButton(
+                    enabled = !demo && !searching,
+                    onClick = {
+                        scope.launch {
+                            searching = true
+                            status = "Ищу сервер OLI в вашей сети…"
+                            try {
+                                val found = repo.findOwnServer()
+                                if (found != null) {
+                                    serverField = found
+                                    status = "Найден компьютер: " +
+                                        found.replace("http://", "").replace("https://", "")
+                                } else {
+                                    status = "Не нашёл сервер в этой сети. Проверьте, что OLI на ПК " +
+                                        "запущен и порт открыт в брандмауэре."
+                                }
+                            } catch (e: Exception) {
+                                status = "Поиск не удался: ${e.message}"
+                            } finally {
+                                searching = false
+                            }
+                        }
+                    }
+                ) { Text(if (searching) "Ищу…" else "Найти мой ПК") }
+            }
             Text(
                 "Адрес виден в OLI на ПК: раздел «Пульт админа» → адрес для телефона. " +
                     "Телефон и ПК должны быть в одной сети (или в вашем VPN).",

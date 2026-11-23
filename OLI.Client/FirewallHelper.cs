@@ -12,6 +12,9 @@ public static class FirewallHelper
 {
     private const string RuleName = "OLI Server (phone app)";
 
+    /// <summary>Set once the rule was confirmed, so a restart does not re-add it.</summary>
+    private static bool _seenOpen;
+
     /// <summary>Runs netsh and returns (exitCode, output). No elevation.</summary>
     private static (int Code, string Output) RunNetsh(string arguments)
     {
@@ -48,24 +51,44 @@ public static class FirewallHelper
     /// </summary>
     public static string? EnsurePortOpen(int port, bool elevated = true)
     {
-        if (RuleExists(port)) return null;
+        // Delete + add in one go, so a stale rule (old profile/port) is replaced instead
+        // of silencing the phone. A rule that already allows the port is fine too.
+        var alreadyOpen = RuleExists(port);
+        if (alreadyOpen && !_seenOpen) { _seenOpen = true; return null; }
 
         var arguments =
             $"advfirewall firewall delete rule name=\"{RuleName}\" & " +
             $"advfirewall firewall add rule name=\"{RuleName}\" dir=in action=allow protocol=TCP localport={port} " +
-            "profile=private,domain";
+            "profile=any";
+
+        // Firewall rules need admin rights. Try silently first: if the app already runs
+        // elevated this works with no UAC prompt at all; otherwise we ask for elevation.
+        var candidate = new ProcessStartInfo("cmd.exe", $"/c netsh {arguments}")
+        {
+            UseShellExecute = true,
+            CreateNoWindow = true,
+            WindowStyle = ProcessWindowStyle.Hidden,
+        };
+        if (!elevated) candidate.Verb = "";
 
         try
         {
-            var psi = new ProcessStartInfo("cmd.exe", $"/c netsh {arguments}")
+            if (elevated)
             {
-                UseShellExecute = true,
-                CreateNoWindow = true,
-                WindowStyle = ProcessWindowStyle.Hidden,
-            };
-            if (elevated) psi.Verb = "runas";
+                using (var quiet = Process.Start(new ProcessStartInfo("cmd.exe", $"/c netsh {arguments}")
+                       {
+                           UseShellExecute = false,
+                           CreateNoWindow = true,
+                           RedirectStandardOutput = true,
+                           RedirectStandardError = true,
+                       }))
+                {
+                    quiet?.WaitForExit(15_000);
+                }
+                if (RuleExists(port)) return null;
+            }
 
-            using var process = Process.Start(psi);
+            using var process = Process.Start(candidate);
             if (process is null) return "не удалось запустить netsh";
             process.WaitForExit(30_000);
 
@@ -83,8 +106,9 @@ public static class FirewallHelper
         }
     }
 
-    /// <summary>Private/public network hint: phones on the same Wi-Fi need the Private profile.</summary>
+    /// <summary>Firewall/profile hint shown next to the server address.</summary>
     public static string Hint(int port) =>
-        $"Если телефон не видит сервер, разрешите порт {port} в брандмауэре Windows " +
-        "(кнопка «Открыть порт» на этой странице) и убедитесь, что сеть помечена как «Частная».";
+        $"Если телефон не видит сервер: разрешите порт {port} в брандмауэре Windows " +
+        "(кнопка «Открыть порт») и проверьте, что телефон и ПК в одной Wi-Fi-сети. " +
+        "Правило для порта работает при любом профиле сети.";
 }

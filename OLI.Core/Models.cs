@@ -46,7 +46,8 @@ public sealed class TelegramSettings
 /// </summary>
 public sealed class ServerSettings
 {
-    public bool Enabled { get; set; }
+    /// <summary>Server was started once and should come back with the app (phone pairs by itself).</summary>
+    public bool Enabled { get; set; } = true;
     public bool AutoStartWithApp { get; set; } = true;
     public string Host { get; set; } = "0.0.0.0";
     public int Port { get; set; } = 8765;

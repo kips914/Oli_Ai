@@ -13,9 +13,9 @@ public sealed class ServerOptions
 
     /// <summary>llama.cpp server the gateway talks to.</summary>
     public string LlamaBaseUrl { get; set; } = "http://127.0.0.1:8080";
-    /// <summary>Full model used while the user still has tokens (k3.pass).</summary>
+    /// <summary>Full model used while the user still has tokens (oli-pass).</summary>
     public string Model { get; set; } = "oli-pass";
-    /// <summary>Light model used after the token limit is exhausted (k3.son).</summary>
+    /// <summary>Light model used after the token limit is exhausted (oli-son).</summary>
     public string LiteModel { get; set; } = "oli-son";
     public int MaxTokens { get; set; } = 768;
     public double Temperature { get; set; } = 0.7;

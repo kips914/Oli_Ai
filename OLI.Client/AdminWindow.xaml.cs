@@ -45,10 +45,9 @@ public partial class AdminWindow : Window
         StartServerButton.IsEnabled = !running;
         StopServerButton.IsEnabled = running;
 
-        var addresses = NetworkInfo.LocalAddresses();
-        ServerAddressText.Text = running && addresses.Count > 0
-            ? $"Телефону указывать: http://{addresses[0]}:{_host.Options.Port}  (или внешний адрес/VPN)"
-            : $"Порт {_host.Options.Port}. Адрес для телефона появится после запуска.";
+        ServerAddressText.Text = running
+            ? $"Адрес для телефона: http://{OLI.Core.NetworkAddresses.Preferred() ?? "—"}:{_host.Options.Port}"
+            : $"Порт {_host.Options.Port}. Адрес для телефона появится после запуска сервера.";
 
         if (running && string.IsNullOrWhiteSpace(ServerDetailsText.Text))
             ServerDetailsText.Text = $"API: {_host.BaseUrl} · пользователей: {_host.RegisteredUsers}";

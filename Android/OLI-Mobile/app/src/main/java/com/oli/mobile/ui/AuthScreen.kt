@@ -81,13 +81,21 @@ fun AuthScreen(repo: OliRepository, defaultServerOffline: Boolean, onDemo: () ->
     var ownServer by remember { mutableStateOf(repo.usingOwnServer) }
     var serverField by remember { mutableStateOf(repo.customServer) }
     var showServerField by remember { mutableStateOf(false) }
+    var searching by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     // The app connects by itself on open; the user does not type an address.
     LaunchedEffect(Unit) {
         checking = true
         health = if (repo.usingOwnServer) {
-            runCatching { repo.useOwnServer(repo.customServer) }.getOrNull()
+            // The PC's IP may have changed: look for it on this Wi-Fi before giving up.
+            val found = runCatching { repo.findOwnServer() }.getOrNull()
+            if (found != null) {
+                serverField = found
+                runCatching { repo.useOwnServer(found) }.getOrNull()
+            } else {
+                runCatching { repo.useOwnServer(repo.customServer) }.getOrNull()
+            }
         } else {
             repo.probeDefaultServer()
         }
@@ -95,7 +103,7 @@ fun AuthScreen(repo: OliRepository, defaultServerOffline: Boolean, onDemo: () ->
             showServerField = true
             ownServer = repo.usingOwnServer
             error = if (repo.usingOwnServer)
-                "Свой сервер не отвечает. Проверьте адрес и что сервер запущен на ПК."
+                "Свой сервер не отвечает. Нажмите «Найти мой ПК» или впишите адрес вручную."
             else
                 "Сервер OLI сейчас недоступен. Можно посмотреть интерфейс без входа или подключить свой ПК."
         }
@@ -384,7 +392,7 @@ fun AuthScreen(repo: OliRepository, defaultServerOffline: Boolean, onDemo: () ->
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Button(
-                                    enabled = serverField.isNotBlank(),
+                                    enabled = serverField.isNotBlank() && !searching,
                                     onClick = {
                                         scope.launch {
                                             checking = true
@@ -401,10 +409,48 @@ fun AuthScreen(repo: OliRepository, defaultServerOffline: Boolean, onDemo: () ->
                                         }
                                     }
                                 ) { Text("Подключиться") }
+                                OutlinedButton(
+                                    enabled = !searching,
+                                    onClick = {
+                                        scope.launch {
+                                            searching = true
+                                            error = null
+                                            info = null
+                                            try {
+                                                val found = repo.findOwnServer()
+                                                if (found != null) {
+                                                    serverField = found
+                                                    ownServer = true
+                                                    health = runCatching { repo.useOwnServer(found) }.getOrNull()
+                                                    info = "Найден компьютер: " +
+                                                        found.replace("http://", "").replace("https://", "")
+                                                } else {
+                                                    health = null
+                                                    error = "Не нашёл сервер в этой сети. Проверьте, что OLI " +
+                                                        "на ПК запущен и порт открыт в брандмауэре."
+                                                }
+                                            } catch (e: Exception) {
+                                                error = "Поиск не удался: ${e.message}"
+                                            } finally {
+                                                searching = false
+                                                checking = false
+                                            }
+                                        }
+                                    }
+                                ) { Text(if (searching) "Ищу…" else "Найти мой ПК") }
                                 TextButton(onClick = { showServerField = false }) { Text("Скрыть") }
                             }
+                            if (searching) {
+                                Text(
+                                    "Ищу сервер OLI в вашей сети…",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 4.dp)
+                                )
+                            }
                             Text(
-                                "Адрес показан в OLI на компьютере: «Пульт админа» → адрес для телефона.",
+                                "Адрес показан в OLI на компьютере: «Пульт админа» → адрес для телефона. " +
+                                    "Телефон и ПК должны быть в одной Wi-Fi-сети.",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(top = 4.dp)
