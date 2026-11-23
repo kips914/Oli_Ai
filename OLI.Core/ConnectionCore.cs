@@ -130,11 +130,14 @@ public static class ConnectionCore
 
         if (raw.StartsWith(JoinScheme, StringComparison.OrdinalIgnoreCase))
             raw = raw[JoinScheme.Length..];
-        if (!raw.StartsWith(JoinPrefix, StringComparison.Ordinal)) return null;
 
+        // The code is base64 of "OLI1|…", so it never *starts* with "OLI1" on the wire.
+        // Decode first, then check the payload; a literal "OLI1|url|invite" still works.
         try
         {
-            var decoded = Encoding.UTF8.GetString(FromBase64Url(raw));
+            var decoded = raw.StartsWith(JoinPrefix, StringComparison.Ordinal)
+                ? raw
+                : Encoding.UTF8.GetString(FromBase64Url(raw));
             var parts = decoded.Split('|');
             if (parts.Length < 2 || parts[0] != JoinPrefix) return null;
             var address = Normalize(parts[1]);

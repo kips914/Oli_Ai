@@ -542,8 +542,12 @@ await using (var live = new OLI.Server.ServerHost(new OLI.Server.ServerOptions
     Check("login returns a fresh token", () => login.Ok && login.Token is not null);
 
     var emptyChat = await client.SendAsync("Как дела?", null, default);
-    Check("chat without an engine returns 503 with a sentence", () =>
-        !emptyChat.Ok && emptyChat.HttpStatus == 503 && emptyChat.EngineDown && emptyChat.Error.Contains("модель", StringComparison.OrdinalIgnoreCase));
+    Check("chat without an engine is a 503, not a 500 or a hang", () =>
+        !emptyChat.Ok && emptyChat.HttpStatus == 503 && emptyChat.EngineDown);
+    Check("the 503 carries a reason and a next step", () =>
+        emptyChat.Error.Length > 10 && emptyChat.Error.Contains("Пульт админа", StringComparison.OrdinalIgnoreCase));
+    Check("a failed answer does not invent a thread that the client cannot open",
+        () => emptyChat.ThreadId is null || emptyChat.ThreadId.Length > 0);
 
     var threads = await client.ListChatsAsync();
     Check("the failed turn still created (and titled) a thread", () =>

@@ -326,12 +326,17 @@ public sealed class ServerHost : IAsyncDisposable
                 }
                 catch (HttpRequestException ex)
                 {
-                    // The PC is fine; the model engine is not. Say exactly that.
-                    var reason = ex.Message;
+                    // The PC is fine; the model engine is not. Say exactly that, and say
+                    // what to do: an empty bubble is the worst possible answer here.
+                    var reason = string.IsNullOrWhiteSpace(ex.Message)
+                        ? "Движок модели не ответил."
+                        : ex.Message;
                     OliLog.Warning("CHAT", "Движок модели: " + reason);
                     return Results.Json(new
                     {
-                        error = reason,
+                        error = reason + " Откройте OLI на ПК: «Пульт админа» → «Проверить всё».",
+                        hint = "engine",
+                        threadId,
                         engine = "down",
                         httpStatus = ex.StatusCode is null ? 0 : (int)ex.StatusCode,
                     }, statusCode: 503);
