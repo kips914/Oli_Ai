@@ -1,11 +1,36 @@
 package com.oli.mobile.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
 import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -99,9 +124,41 @@ fun ChatScreen(
     var modelsOpen by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    val haptics = LocalHapticFeedback.current
 
+    // --- photo for analysis
+    var attachment by remember { mutableStateOf<PendingImage?>(null) }
+    var fullScreen by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+    var pickedUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    val context = LocalContext.current
+    val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        pickedUri = uri
+    }
+    LaunchedEffect(pickedUri) {
+        val uri = pickedUri ?: return@LaunchedEffect
+        pickedUri = null
+        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        attachment = loadPendingImage(context, uri)
+    }
+
+    // animated entrance for the whole screen
+    val enter = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { enter.animateTo(1f, tween(450)) }
+
+    // keep the chat scrolled to the newest message (and to the typing bubble)
     LaunchedEffect(messages.size, busy) {
         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size)
+    }
+
+    // swipe right anywhere on the canvas → chats drawer; swipe left → new chat
+    fun onSwipe(totalX: Float) {
+        if (totalX > 90f) {
+            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            drawerOpen = true
+        } else if (totalX < -90f) {
+            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            scope.launch { repo.newChat() }
+        }
     }
 
     val selectedModel = modelState?.models?.firstOrNull { it.id == modelState.selected }
@@ -113,12 +170,36 @@ fun ChatScreen(
 
     fun send(text: String) {
         val value = text.trim()
+        val photo = attachment
+        if (photo != null && !busy) {
+            // A photo is attached: the question goes with it (empty question is fine).
+            attachment = null
+            input = ""
+            scope.launch { repo.analyzeImage(photo.bitmap, photo.fileName, value) }
+            return
+        }
         if (value.isEmpty() || busy) return
         input = ""
         scope.launch { repo.send(value) }
     }
 
-    Box(Modifier.fillMaxSize().background(OliInk)) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(OliInk)
+            .scale(0.98f + 0.02f * enter.value)
+            .alpha(enter.value)
+            // Horizontal swipes anywhere: right → chats drawer, left → new chat.
+            // The vertical list keeps its own scrolling (it consumes only vertical drags).
+            .pointerInput(Unit) {
+                var total = 0f
+                detectHorizontalDragGestures(
+                    onDragStart = { total = 0f },
+                    onDragEnd = { onSwipe(total); total = 0f },
+                    onDragCancel = { total = 0f }
+                ) { _, dragAmount -> total += dragAmount }
+            }
+    ) {
         // backlight
         Box(
             Modifier
@@ -136,6 +217,10 @@ fun ChatScreen(
                     )
                 )
         )
+
+        // living background: drifting aurora + a light sweep across the canvas
+        AuroraBackdrop(intensity = if (busy) 1.6f else 1f)
+        LightSweep()
 
         Column(Modifier.fillMaxSize().statusBarsPadding().imePadding()) {
             if (demo) DemoBanner(onExitDemo)
@@ -167,7 +252,9 @@ fun ChatScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     item { Spacer(Modifier.height(6.dp)) }
-                    items(messages, key = { it.id }) { message -> MessageBubble(message) }
+                    items(messages, key = { it.id }) { message ->
+                        MessageBubble(message, onImageTap = { fullScreen = it })
+                    }
                     if (busy) item { TypingBubble() }
                     item { Spacer(Modifier.height(8.dp)) }
                 }
@@ -179,8 +266,15 @@ fun ChatScreen(
                 value = input,
                 onValueChange = { input = it },
                 enabled = !busy,
-                placeholder = if (demo) "Режим просмотра — сообщение не отправится" else "Спроси меня. Поручи мне.",
+                placeholder = when {
+                    attachment != null -> "Что сделать с фото?"
+                    demo -> "Режим просмотра — сообщение не отправится"
+                    else -> "Спроси меня. Поручи мне."
+                },
                 usage = usageLimits,
+                attachment = attachment,
+                onClearAttachment = { attachment = null },
+                onPickImage = { pickImage.launch("image/*") },
                 onSend = { send(input) },
                 onAttach = onOpenFiles,
                 onOpenLimits = { modelsOpen = true }
@@ -207,6 +301,11 @@ fun ChatScreen(
             onDismiss = { modelsOpen = false },
             onPick = { id -> onPickModel(id); modelsOpen = false }
         )
+    }
+
+    // Tapping a picture opens it full screen (pinch-free, tap/back closes).
+    fullScreen?.let { bitmap ->
+        ImageViewer(bitmap) { fullScreen = null }
     }
 }
 
@@ -285,9 +384,15 @@ private fun Hero(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Box(contentAlignment = Alignment.Center) {
+        val heroIn = remember { Animatable(0f) }
+        LaunchedEffect(Unit) { heroIn.animateTo(1f, spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessLow)) }
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.scale(0.8f + 0.2f * heroIn.value).alpha(heroIn.value)
+        ) {
             OliBurst(size = 250.dp)
             OliMark(size = 130.dp, working = busy)
+            Sparkles(Modifier.offset(x = 96.dp, y = (-48).dp))
         }
 
         Spacer(Modifier.height(28.dp))
@@ -396,6 +501,9 @@ private fun Composer(
     enabled: Boolean,
     placeholder: String,
     usage: UsageSnapshotData?,
+    attachment: PendingImage?,
+    onClearAttachment: () -> Unit,
+    onPickImage: () -> Unit,
     onSend: () -> Unit,
     onAttach: () -> Unit,
     onOpenLimits: () -> Unit
@@ -435,6 +543,48 @@ private fun Composer(
             Spacer(Modifier.height(6.dp))
         }
 
+        // preview of the photo that will be analysed
+        AnimatedVisibility(
+            visible = attachment != null,
+            enter = fadeIn() + slideInVertically(initialOffsetY = { it / 2 }) + scaleIn(initialScale = 0.9f),
+            exit = fadeOut()
+        ) {
+            attachment?.let { photo ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 4.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(OliGlass)
+                        .border(1.dp, OliBlue.copy(alpha = 0.45f), RoundedCornerShape(16.dp))
+                        .padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Image(
+                        bitmap = photo.bitmap.asImageBitmap(),
+                        contentDescription = "Фото для анализа",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.size(52.dp).clip(RoundedCornerShape(12.dp))
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Фото для анализа", style = MaterialTheme.typography.labelMedium, color = OliText)
+                        Text(
+                            "Спросите что угодно — OLI посмотрит картинку",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = OliTextMuted
+                        )
+                    }
+                    Box(
+                        Modifier.size(34.dp).clip(CircleShape).clickable(onClick = onClearAttachment),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("✕", color = OliTextMuted, style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
+        }
+
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -450,6 +600,7 @@ private fun Composer(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButtonBox(icon = Icons.Filled.Add, description = "Файлы", onClick = onAttach)
+                    IconButtonBox(icon = Icons.Filled.PhotoCamera, description = "Фото для анализа", onClick = onPickImage)
                     Box(Modifier.weight(1f)) {
                         if (value.isEmpty()) {
                             Text(placeholder, style = MaterialTheme.typography.bodyLarge, color = OliTextMuted, maxLines = 1)
@@ -484,10 +635,10 @@ private fun IconButtonBox(
     onClick: () -> Unit
 ) {
     Box(
-        Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onClick),
+        Modifier.size(40.dp).clip(CircleShape).clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Icon(icon, contentDescription = description, tint = OliTextMuted, modifier = Modifier.size(21.dp))
+        Icon(icon, contentDescription = description, tint = OliTextMuted, modifier = Modifier.size(20.dp))
     }
 }
 
@@ -517,10 +668,22 @@ private fun SendButton(enabled: Boolean, onClick: () -> Unit) {
 // ------------------------------------------------------------------ messages
 
 @Composable
-private fun MessageBubble(message: OliRepository.ChatMessage) {
+private fun MessageBubble(message: OliRepository.ChatMessage, onImageTap: (android.graphics.Bitmap) -> Unit = {}) {
     val isUser = message.fromUser
+
+    // Bubble entrance: grows from 92% and fades in, like a message "landing" in the chat.
+    val appear = remember { Animatable(0f) }
+    LaunchedEffect(message.id) { appear.animateTo(1f, spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow)) }
+
     Row(
-        Modifier.fillMaxWidth(),
+        Modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                alpha = appear.value
+                scaleX = 0.92f + 0.08f * appear.value
+                scaleY = 0.92f + 0.08f * appear.value
+                transformOrigin = TransformOrigin(if (isUser) 1f else 0f, 1f)
+            },
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
         verticalAlignment = Alignment.Bottom
     ) {
@@ -547,6 +710,19 @@ private fun MessageBubble(message: OliRepository.ChatMessage) {
                 .padding(horizontal = 15.dp, vertical = 11.dp)
         ) {
             Column {
+                message.image?.let { bitmap ->
+                    Image(
+                        bitmap = bitmap.asImageBitmap(),
+                        contentDescription = "Приложенное изображение",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .widthIn(max = 260.dp)
+                            .aspectRatio(bitmap.width.toFloat() / bitmap.height.toFloat())
+                            .clip(RoundedCornerShape(12.dp))
+                            .pointerInput(bitmap) { detectTapGestures { onImageTap(bitmap) } }
+                    )
+                    Spacer(Modifier.height(8.dp))
+                }
                 Text(
                     message.text.ifBlank { "…" },
                     style = MaterialTheme.typography.bodyMedium,
@@ -568,7 +744,10 @@ private fun MessageBubble(message: OliRepository.ChatMessage) {
 @Composable
 private fun TypingBubble() {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
-        OliMark(size = 26.dp, working = true)
+        Box(contentAlignment = Alignment.Center) {
+            PulseHalo(active = true)
+            OliMark(size = 26.dp, working = true)
+        }
         Spacer(Modifier.width(8.dp))
         Box(
             Modifier
@@ -580,11 +759,101 @@ private fun TypingBubble() {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = OliBlueBright)
                 Spacer(Modifier.width(10.dp))
-                Text("OLI думает…", style = MaterialTheme.typography.bodyMedium, color = OliTextMuted)
+                ThinkingWord()
             }
         }
     }
 }
+
+/** "OLI думает", "смотрит", "собирает ответ" — cycles while the model works. */
+@Composable
+private fun ThinkingWord() {
+    val words = remember { listOf("думает", "читает", "собирает ответ", "проверяет детали") }
+    var index by remember { mutableStateOf(0) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(1600)
+            index = (index + 1) % words.size
+        }
+    }
+    androidx.compose.animation.Crossfade(targetState = index, animationSpec = tween(400), label = "thinking") { i ->
+        Text("OLI ${words[i]}…", style = MaterialTheme.typography.bodyMedium, color = OliTextMuted)
+    }
+}
+
+/** Full-screen picture: tap anywhere or press back to close. */
+@Composable
+private fun ImageViewer(bitmap: android.graphics.Bitmap, onClose: () -> Unit) {
+    Dialog(
+        onDismissRequest = onClose,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        val appear = remember { Animatable(0f) }
+        LaunchedEffect(Unit) { appear.animateTo(1f, tween(220)) }
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.94f * appear.value))
+                .pointerInput(Unit) { detectTapGestures { onClose() } },
+            contentAlignment = Alignment.Center
+        ) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = "Изображение",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp)
+                    .scale(0.85f + 0.15f * appear.value)
+            )
+            Text(
+                "Нажмите, чтобы закрыть",
+                style = MaterialTheme.typography.labelSmall,
+                color = OliTextMuted,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 36.dp)
+            )
+        }
+    }
+}
+
+/** Loads and downscales a picked photo so it uploads fast and fits the bubble. */
+internal fun loadPendingImage(context: android.content.Context, uri: android.net.Uri): PendingImage? {
+    return runCatching {
+        val bitmap = context.contentResolver.openInputStream(uri)?.use { stream ->
+            val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            android.graphics.BitmapFactory.decodeStream(stream, null, bounds)
+            stream.close()
+
+            var sample = 1
+            val longest = maxOf(bounds.outWidth, bounds.outHeight)
+            while (longest / sample > 1600) sample *= 2
+
+            val options = android.graphics.BitmapFactory.Options().apply {
+                inSampleSize = sample
+                inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888
+            }
+            context.contentResolver.openInputStream(uri)?.use { second ->
+                android.graphics.BitmapFactory.decodeStream(second, null, options)
+            }
+        } ?: return null
+        PendingImage(bitmap, fileNameFor(context, uri))
+    }.getOrNull()
+}
+
+/** File name for an image picked through the system picker (falls back to a timestamp). */
+internal fun fileNameFor(context: android.content.Context, uri: android.net.Uri): String {
+    val fromProvider = runCatching {
+        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val index = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+            if (index >= 0 && cursor.moveToFirst()) cursor.getString(index) else null
+        }
+    }.getOrNull()
+    val name = fromProvider?.takeIf { it.isNotBlank() } ?: "photo-${System.currentTimeMillis()}.jpg"
+    return if (name.contains('.')) name else "$name.jpg"
+}
+
+/** An image waiting in the composer. */
+internal data class PendingImage(val bitmap: android.graphics.Bitmap, val fileName: String)
 
 // ------------------------------------------------------------------ small parts
 

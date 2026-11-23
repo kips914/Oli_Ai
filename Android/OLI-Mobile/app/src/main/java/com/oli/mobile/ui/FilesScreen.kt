@@ -24,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
@@ -238,7 +239,14 @@ fun FilesScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
-                            if (entry.isDirectory) Icons.Filled.Folder else Icons.Filled.Description,
+                            when {
+                                entry.isDirectory -> Icons.Filled.Folder
+                                entry.name.lowercase().endsWith(".png") ||
+                                    entry.name.lowercase().endsWith(".jpg") ||
+                                    entry.name.lowercase().endsWith(".jpeg") ||
+                                    entry.name.lowercase().endsWith(".webp") -> Icons.Filled.Image
+                                else -> Icons.Filled.Description
+                            },
                             contentDescription = null,
                             tint = if (entry.isDirectory) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurfaceVariant,

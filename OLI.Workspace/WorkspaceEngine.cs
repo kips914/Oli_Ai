@@ -143,6 +143,41 @@ public sealed class WorkspaceEngine
 
     // ---------------------------------------------------------------- files
 
+    /// <summary>
+    /// Raw bytes in / out. Used for uploads (photos for analysis, documents) and for
+    /// serving them back. Paths are resolved through the same sandbox guard as text files.
+    /// </summary>
+    public byte[] ReadBytes(string relativePath)
+    {
+        var full = PathGuard.Resolve(Root, relativePath);
+        if (Directory.Exists(full)) throw new WorkspaceException("Это папка, а не файл.");
+        if (!File.Exists(full)) throw new WorkspaceException($"Файл не найден: {Display(full)}");
+        return File.ReadAllBytes(full);
+    }
+
+    /// <summary>Writes bytes (no text encoding involved) and enforces quota + file size.</summary>
+    public async Task<long> WriteBytesAsync(string relativePath, byte[] bytes, CancellationToken ct = default)
+    {
+        await _gate.WaitAsync(ct);
+        try
+        {
+            var full = PathGuard.Resolve(Root, relativePath);
+            PathGuard.EnsureCreatableFileName(Path.GetFileName(full));
+            if (bytes.LongLength > MaxFileBytes)
+                throw new WorkspaceException(
+                    $"Файл слишком большой: {TextExtractors.FormatSize(bytes.LongLength)} " +
+                    $"(лимит {TextExtractors.FormatSize(MaxFileBytes)}).");
+
+            var existing = File.Exists(full) ? new FileInfo(full).Length : 0;
+            EnsureHeadroom(Math.Max(0, bytes.LongLength - existing));
+
+            Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+            await File.WriteAllBytesAsync(full, bytes, ct);
+            return new FileInfo(full).Length;
+        }
+        finally { _gate.Release(); }
+    }
+
     public async Task<string> WriteFileAsync(string relativePath, string content, bool append = false, CancellationToken ct = default)
     {
         await _gate.WaitAsync(ct);

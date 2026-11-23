@@ -512,6 +512,155 @@ public sealed class ServerHost : IAsyncDisposable
             catch (WorkspaceException ex) { return Results.Json(new { error = ex.Message }, statusCode: 400); }
         });
 
+        // ------------------------------------------------------------ uploads
+        // The phone sends the raw bytes of one file (an image for analysis, a document for
+        // the workspace). Small and dependency-free on purpose: no multipart parsing.
+        app.MapPost("/api/files/upload", async (HttpContext http, CancellationToken ct) =>
+        {
+            var account = CurrentAccount(http);
+            if (account is null) return Unauthorized();
+
+            string name;
+            try { name = (http.Request.Query["name"].ToString() ?? "").Trim(); }
+            catch { name = ""; }
+            if (string.IsNullOrWhiteSpace(name)) name = "upload.bin";
+
+            using var buffer = new MemoryStream();
+            await http.Request.Body.CopyToAsync(buffer, ct);
+            var bytes = buffer.ToArray();
+            if (bytes.Length == 0) return Results.Json(new { error = "Пустой файл." }, statusCode: 400);
+
+            var isImage = IsImageName(name);
+            if (isImage && bytes.Length > ImageAnalyzer.MaxBytes)
+                return Results.Json(new { error = $"Изображение больше {ImageAnalyzer.MaxBytes / 1024 / 1024} МБ." }, statusCode: 413);
+
+            var safeName = SafeUploadName(name);
+            var folder = isImage ? "images" : "files";
+            var path = $"{folder}/{DateTime.UtcNow:yyyy-MM-dd}-{safeName}";
+
+            var workspace = _workspaces.Get(account.Id, account.QuotaBytes);
+            try
+            {
+                await workspace.Engine.WriteBytesAsync(path, bytes, ct);
+            }
+            catch (WorkspaceException ex)
+            {
+                return Results.Json(new { error = ex.Message }, statusCode: 400);
+            }
+
+            return Results.Json(new
+            {
+                ok = true,
+                name = safeName,
+                path,
+                isImage,
+                size = bytes.Length,
+                url = $"/api/files/raw?path={Uri.EscapeDataString(path)}",
+            });
+        });
+
+        // Serves a workspace file (an uploaded photo) back to the phone.
+        app.MapGet("/api/files/raw", (HttpContext http, string path) =>
+        {
+            var account = CurrentAccount(http);
+            if (account is null) return Unauthorized();
+            try
+            {
+                var workspace = _workspaces.Get(account.Id, account.QuotaBytes);
+                var bytes = workspace.Engine.ReadBytes(path);
+                return Results.File(bytes, ContentTypeFor(path));
+            }
+            catch (Exception ex) when (ex is WorkspaceException or FileNotFoundException or DirectoryNotFoundException)
+            {
+                return Results.Json(new { error = ex.Message }, statusCode: 404);
+            }
+        });
+
+        // ------------------------------------------------------------ image analysis
+
+        app.MapPost("/api/vision", async (VisionRequest request, HttpContext http, CancellationToken ct) =>
+        {
+            var account = CurrentAccount(http);
+            if (account is null) return Unauthorized();
+
+            var question = (request.Question ?? "").Trim();
+            if (question.Length == 0) question = "Что на этом изображении? Опиши подробно.";
+            if (question.Length > 4000) return Results.Json(new { error = "Вопрос слишком длинный." }, statusCode: 400);
+
+            var workspace = _workspaces.Get(account.Id, account.QuotaBytes);
+            byte[] bytes;
+            try
+            {
+                bytes = workspace.Engine.ReadBytes(request.Path ?? "");
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new { error = "Файл не найден: " + ex.Message }, statusCode: 404);
+            }
+
+            if (bytes.Length > ImageAnalyzer.MaxBytes)
+                return Results.Json(new { error = "Изображение слишком большое для анализа." }, statusCode: 413);
+
+            // --- dynamic token allowance (same policy as /api/chat)
+            var activeUsers = Math.Max(1, _usage.ActiveUsers() + 1);
+            var (hourlyLimit, dailyLimit) = _limits.Allowance(activeUsers);
+            var (hourTokens, dayTokens) = _usage.For(account.Id);
+            var hourLeft = Math.Max(0, hourlyLimit - hourTokens);
+            var dayLeft = Math.Max(0, dailyLimit - dayTokens);
+            var limitLeft = Math.Min(hourLeft, dayLeft);
+            var exhausted = limitLeft <= 900;
+
+            var modelId = exhausted ? _options.LiteModel
+                : (string.IsNullOrWhiteSpace(account.ModelId) ? _options.Model : account.ModelId);
+            if (modelId is not ("oli-pass" or "oli-son")) modelId = _options.Model;
+
+            var fileName = Path.GetFileName((request.Path ?? "").Replace('\\', '/'));
+            var block = ImageAnalyzer.Describe(fileName, bytes);
+            var prompt = block + "\n\nВопрос пользователя: " + question;
+
+            var session = GetSession(account);
+            session.SelectModel(modelId);
+            session.SetAnswerBudget(exhausted ? 220 : 0);
+
+            var gate = _sessionLocks.GetOrAdd(account.Id, _ => new SemaphoreSlim(1, 1));
+            if (!await gate.WaitAsync(TimeSpan.FromSeconds(2), ct))
+                return Results.Json(new { error = "Предыдущий ответ ещё готовится." }, statusCode: 429);
+
+            try
+            {
+                var answer = await session.SendAsync(prompt, progress: null, ct);
+
+                var promptTokens = TokenEstimator.Estimate(prompt) + 700;
+                var completionTokens = TokenEstimator.Estimate(answer.Text);
+                _usage.Add(new UsageEntry
+                {
+                    AccountId = account.Id,
+                    ModelId = modelId,
+                    PromptTokens = promptTokens,
+                    CompletionTokens = completionTokens,
+                });
+                var (hourNow, dayNow) = _usage.For(account.Id);
+
+                return Results.Json(new
+                {
+                    text = answer.Text,
+                    path = request.Path,
+                    model = modelId == _options.LiteModel ? "Olim Son" : "Olim Pass",
+                    modelId,
+                    limited = exhausted,
+                    usage = new
+                    {
+                        hourUsed = hourNow,
+                        hourLimit = hourlyLimit,
+                        dayUsed = dayNow,
+                        dayLimit = dailyLimit,
+                        activeUsers = activeUsers,
+                    },
+                });
+            }
+            finally { gate.Release(); }
+        });
+
         app.MapGet("/api/files/usage", (HttpContext http) =>
         {
             var account = CurrentAccount(http);
@@ -745,6 +894,37 @@ public sealed class ServerHost : IAsyncDisposable
 
     private static string SafeRelative(string path) => path.Replace('\\', '/');
 
+    private static bool IsImageName(string name)
+    {
+        var ext = Path.GetExtension(name).ToLowerInvariant();
+        return ext is ".png" or ".jpg" or ".jpeg" or ".webp" or ".gif" or ".bmp";
+    }
+
+    private static string SafeUploadName(string name)
+    {
+        var clean = Path.GetFileName(name.Replace('\\', '/')).Trim();
+        foreach (var bad in Path.GetInvalidFileNameChars()) clean = clean.Replace(bad, '_');
+        if (clean.Length == 0) clean = "upload.bin";
+        if (clean.Length > 80)
+        {
+            var ext = Path.GetExtension(clean);
+            clean = clean[..Math.Max(1, 80 - ext.Length)] + ext;
+        }
+        return clean;
+    }
+
+    private static string ContentTypeFor(string path) => Path.GetExtension(path).ToLowerInvariant() switch
+    {
+        ".png" => "image/png",
+        ".jpg" or ".jpeg" => "image/jpeg",
+        ".webp" => "image/webp",
+        ".gif" => "image/gif",
+        ".bmp" => "image/bmp",
+        ".pdf" => "application/pdf",
+        ".txt" or ".md" or ".json" or ".cs" or ".kt" => "text/plain; charset=utf-8",
+        _ => "application/octet-stream",
+    };
+
     // ---------------------------------------------------------------- throttling
 
     private static string ClientKey(HttpContext http) =>
@@ -845,6 +1025,7 @@ public sealed class ServerHost : IAsyncDisposable
     public sealed record NewChatRequest(string? Title, string? ModelId);
     public sealed record RenameChatRequest(string? Title);
     public sealed record WriteFileRequest(string? Path, string? Content, bool Append);
+    public sealed record VisionRequest(string? Path, string? Question);
     public sealed record DeleteFileRequest(string? Path, bool Recursive);
     public sealed record AdminQuotaRequest(string? AccountId, long QuotaBytes);
     public sealed record AdminDisableRequest(string? AccountId, bool Disabled);

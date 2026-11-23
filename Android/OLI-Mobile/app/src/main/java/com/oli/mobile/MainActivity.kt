@@ -5,7 +5,18 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Surface
@@ -29,6 +40,7 @@ import com.oli.mobile.ui.FilesScreen
 import com.oli.mobile.ui.OliTheme
 import com.oli.mobile.ui.ProfileScreen
 import com.oli.mobile.ui.SettingsScreen
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -105,71 +117,171 @@ private fun OliApp() {
             }
             val initial = (user.displayName.ifBlank { user.userName }).trim().take(1).uppercase().ifBlank { "O" }
 
-            when (screen) {
-                Screen.Chat -> ChatScreen(
+            // Every screen change animates: forward pages slide in from the right,
+            // going back slides in from the left, both with a soft fade/scale.
+            AnimatedContent(
+                targetState = screen,
+                modifier = Modifier.fillMaxSize(),
+                transitionSpec = {
+                    val forward = targetState.ordinal >= initialState.ordinal
+                    val dir = if (forward) 1 else -1
+                    (fadeIn(tween(220)) +
+                        slideInHorizontally(tween(280)) { it / 6 * dir } +
+                        scaleIn(tween(280), initialScale = 0.97f))
+                        .togetherWith(
+                            fadeOut(tween(160)) +
+                                slideOutHorizontally(tween(220)) { it / 8 * -dir } +
+                                scaleOut(tween(220), targetScale = 0.97f)
+                        )
+                },
+                label = "screen"
+            ) { current ->
+                OliScreen(
+                    screen = current,
                     repo = repo,
+                    demo = demo,
+                    user = user,
+                    initial = initial,
                     messages = messages,
                     busy = busy,
-                    displayName = if (demo) "гость" else user.displayName,
-                    demo = demo,
-                    userInitial = initial,
-                    modelState = models,
-                    usageLimits = limits,
+                    usage = usage,
+                    models = models,
+                    limits = limits,
                     chats = chats,
                     activeThread = activeThread,
                     limitNotice = limitNotice,
-                    onOpenFiles = { filesPath = ""; screen = Screen.Files },
-                    onExitDemo = { repo.exitDemo() },
-                    onOpenSettings = { screen = Screen.Settings },
-                    onOpenProfile = { screen = Screen.Profile },
-                    onPickModel = { id -> scope.launch { repo.chooseModel(id) } },
-                    onOpenChat = { id -> scope.launch { repo.openChat(id) } },
-                    onDeleteChat = { id -> scope.launch { repo.deleteChat(id) } },
-                    onDismissLimit = { repo.dismissLimitNotice() }
+                    filesPath = filesPath,
+                    onFilesPathChange = { filesPath = it },
+                    onNavigate = { screen = it },
+                    scope = scope
                 )
-
-                Screen.Files -> FilesScreen(
-                    repo = repo,
-                    usage = if (demo) null else usage,
-                    demo = demo,
-                    path = filesPath,
-                    onPathChange = { filesPath = it },
-                    onBack = { screen = Screen.Chat }
-                )
-
-                Screen.Settings -> SettingsScreen(
-                    repo = repo,
-                    user = user,
-                    usagePercent = usage?.percent ?: 0.0,
-                    demo = demo,
-                    onSignedOut = { screen = Screen.Chat },
-                    onExitDemo = { repo.exitDemo(); screen = Screen.Chat },
-                    onBack = { screen = Screen.Chat },
-                    onOpenAbout = { screen = Screen.About },
-                    onOpenStorage = { filesPath = ""; screen = Screen.Files },
-                    onOpenProfile = { screen = Screen.Profile }
-                )
-
-                Screen.Profile -> ProfileScreen(
-                    repo = repo,
-                    user = user,
-                    usage = limits,
-                    filesUsedBytes = usage?.used ?: 0L,
-                    filesQuotaBytes = usage?.quota ?: (1024L * 1024 * 1024),
-                    demo = demo,
-                    onBack = { screen = Screen.Chat },
-                    onOpenStorage = { filesPath = ""; screen = Screen.Files },
-                    onOpenSettings = { screen = Screen.Settings },
-                    onLogout = {
-                        scope.launch {
-                            repo.logout(forgetPassword = false)
-                            screen = Screen.Chat
-                        }
-                    }
-                )
-
-                Screen.About -> AboutScreen(onBack = { screen = Screen.Settings })
             }
+        }
+    }
+}
+
+/**
+ * One screen of the app. Kept in a separate composable so the navigation graph above
+ * stays readable and every screen gets the same animation wrapper.
+ *
+ * Gestures: a horizontal swipe anywhere on the page works like the system back gesture —
+ * right swipe from a page returns to the chat, left swipe on a sub-page goes back one level.
+ */
+@Composable
+private fun OliScreen(
+    screen: Screen,
+    repo: OliRepository,
+    demo: Boolean,
+    user: UserProfile,
+    initial: String,
+    messages: List<OliRepository.ChatMessage>,
+    busy: Boolean,
+    usage: com.oli.mobile.data.Usage?,
+    models: com.oli.mobile.data.ModelState?,
+    limits: com.oli.mobile.data.UsageSnapshotData?,
+    chats: List<com.oli.mobile.data.ChatSummary>,
+    activeThread: String?,
+    limitNotice: Boolean,
+    filesPath: String,
+    onFilesPathChange: (String) -> Unit,
+    onNavigate: (Screen) -> Unit,
+    scope: kotlinx.coroutines.CoroutineScope
+) {
+    val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
+    fun back() {
+        haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+        onNavigate(Screen.Chat)
+    }
+
+    val swipeBack = Modifier
+        .fillMaxSize()
+        .pointerInput(screen, filesPath) {
+            var total = 0f
+            androidx.compose.foundation.gestures.detectHorizontalDragGestures(
+                onDragStart = { total = 0f },
+                onDragEnd = {
+                    if (total > 100f && screen != Screen.Chat) {
+                        if (screen == Screen.Files && filesPath.isNotEmpty())
+                            onFilesPathChange(filesPath.substringBeforeLast('/', ""))
+                        else back()
+                    }
+                    total = 0f
+                },
+                onDragCancel = { total = 0f }
+            ) { _, dragAmount -> total += dragAmount }
+        }
+
+    when (screen) {
+        Screen.Chat -> ChatScreen(
+            repo = repo,
+            messages = messages,
+            busy = busy,
+            displayName = if (demo) "гость" else user.displayName,
+            demo = demo,
+            userInitial = initial,
+            modelState = models,
+            usageLimits = limits,
+            chats = chats,
+            activeThread = activeThread,
+            limitNotice = limitNotice,
+            onOpenFiles = { onFilesPathChange(""); onNavigate(Screen.Files) },
+            onExitDemo = { repo.exitDemo() },
+            onOpenSettings = { onNavigate(Screen.Settings) },
+            onOpenProfile = { onNavigate(Screen.Profile) },
+            onPickModel = { id -> scope.launch { repo.chooseModel(id) } },
+            onOpenChat = { id -> scope.launch { repo.openChat(id) } },
+            onDeleteChat = { id -> scope.launch { repo.deleteChat(id) } },
+            onDismissLimit = { repo.dismissLimitNotice() }
+        )
+
+        Screen.Files -> Box(swipeBack) {
+            FilesScreen(
+                repo = repo,
+                usage = if (demo) null else usage,
+                demo = demo,
+                path = filesPath,
+                onPathChange = onFilesPathChange,
+                onBack = { back() }
+            )
+        }
+
+        Screen.Settings -> Box(swipeBack) {
+            SettingsScreen(
+                repo = repo,
+                user = user,
+                usagePercent = usage?.percent ?: 0.0,
+                demo = demo,
+                onSignedOut = { onNavigate(Screen.Chat) },
+                onExitDemo = { repo.exitDemo(); onNavigate(Screen.Chat) },
+                onBack = { back() },
+                onOpenAbout = { onNavigate(Screen.About) },
+                onOpenStorage = { onFilesPathChange(""); onNavigate(Screen.Files) },
+                onOpenProfile = { onNavigate(Screen.Profile) }
+            )
+        }
+
+        Screen.Profile -> Box(swipeBack) {
+            ProfileScreen(
+                repo = repo,
+                user = user,
+                usage = limits,
+                filesUsedBytes = usage?.used ?: 0L,
+                filesQuotaBytes = usage?.quota ?: (1024L * 1024 * 1024),
+                demo = demo,
+                onBack = { back() },
+                onOpenStorage = { onFilesPathChange(""); onNavigate(Screen.Files) },
+                onOpenSettings = { onNavigate(Screen.Settings) },
+                onLogout = {
+                    scope.launch {
+                        repo.logout(forgetPassword = false)
+                        onNavigate(Screen.Chat)
+                    }
+                }
+            )
+        }
+
+        Screen.About -> Box(swipeBack) {
+            AboutScreen(onBack = { onNavigate(Screen.Settings) })
         }
     }
 }

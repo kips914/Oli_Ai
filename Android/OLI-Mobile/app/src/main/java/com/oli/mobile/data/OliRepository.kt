@@ -17,7 +17,16 @@ class OliRepository(private val context: Context) {
         const val DEFAULT_PORT = 8765
     }
 
-    data class ChatMessage(val id: Long, val fromUser: Boolean, val text: String, val files: List<String> = emptyList())
+    data class ChatMessage(
+        val id: Long,
+        val fromUser: Boolean,
+        val text: String,
+        val files: List<String> = emptyList(),
+        /** Local thumbnail of an attached photo (null for pure text messages). */
+        val image: android.graphics.Bitmap? = null,
+        /** True while the answer to an attached image is still being prepared. */
+        val analyzing: Boolean = false
+    )
 
     private val _session = MutableStateFlow<Session>(Session.Loading)
     val session: StateFlow<Session> = _session.asStateFlow()
@@ -326,6 +335,53 @@ class OliRepository(private val context: Context) {
             val message = e.message ?: "Ошибка сети"
             _messages.value = _messages.value + ChatMessage(nextId++, fromUser = false, text = "⚠ $message")
             message
+        } finally {
+            _busy.value = false
+        }
+    }
+
+    /**
+     * Sends a photo for analysis: the bytes go to the user's workspace first, then the
+     * question is asked about that file. The bubble appears instantly with the picture,
+     * so the user sees what was attached while the answer is being prepared.
+     */
+    suspend fun analyzeImage(bitmap: android.graphics.Bitmap, fileName: String, question: String?) {
+        val bytes = java.io.ByteArrayOutputStream().use { out ->
+            bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 88, out)
+            out.toByteArray()
+        }
+        val prompt = question?.trim().orEmpty().ifBlank { "Что на этом изображении? Опиши подробно." }
+        val messageId = nextId++
+        _messages.value = _messages.value + ChatMessage(
+            id = messageId,
+            fromUser = true,
+            text = prompt,
+            image = bitmap
+        )
+
+        if (isDemo) {
+            _messages.value = _messages.value + ChatMessage(
+                nextId++, fromUser = false,
+                text = "👁 Режим просмотра: изображение не отправлено. Войдите в аккаунт, чтобы OLI его разобрал."
+            )
+            return
+        }
+
+        _busy.value = true
+        try {
+            val path = api.uploadImage(fileName.ifBlank { "photo.jpg" }, bytes)
+            val reply = api.vision(path, prompt)
+            _messages.value = _messages.value + ChatMessage(
+                nextId++, fromUser = false, text = reply.text.ifBlank { "Не удалось разобрать изображение." }
+            )
+            _limitNotice.value = reply.limited
+            refreshUsage()
+            refreshChats()
+        } catch (e: Exception) {
+            _messages.value = _messages.value + ChatMessage(
+                nextId++, fromUser = false,
+                text = "⚠ Не удалось проанализировать изображение: ${e.message ?: "ошибка сети"}"
+            )
         } finally {
             _busy.value = false
         }

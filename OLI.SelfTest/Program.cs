@@ -266,6 +266,33 @@ await CheckAsync("LAN scan rejects a dead port quickly", async () =>
     return found is null && watch.Elapsed < TimeSpan.FromSeconds(30);
 });
 
+// ------------------------------------------------------------ image analysis
+// The phone sends photos for analysis; the description block is built from the real
+// bytes, so a broken or unsupported file must never crash the server.
+
+var tinyPng = new byte[]
+{
+    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // signature
+    0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, // IHDR length + type
+    0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x20, // 64 x 32
+    0x08, 0x02, 0x00, 0x00, 0x00
+};
+
+Check("image description names the file and the kind", () =>
+{
+    var text = OLI.Agent.ImageAnalyzer.Describe("photo.png", tinyPng);
+    return text.Contains("photo.png") && text.Contains("PNG");
+});
+Check("png size is read from the header", () =>
+    OLI.Agent.ImageAnalyzer.Describe("a.png", tinyPng).Contains("64×32"));
+Check("broken bytes still produce a description", () =>
+{
+    var text = OLI.Agent.ImageAnalyzer.Describe("scan.bin", new byte[] { 1, 2, 3, 4 });
+    return text.Contains("scan.bin") && text.Length > 40;
+});
+Check("description never leaks a stack trace", () =>
+    !OLI.Agent.ImageAnalyzer.Describe("x.jpg", new byte[] { 0xFF, 0xD8, 0xFF }).Contains("Exception"));
+
 // ------------------------------------------------------------------ helpers
 
 static async Task<bool> ZipSlipBlocked(WorkspaceEngine workspace, string root)

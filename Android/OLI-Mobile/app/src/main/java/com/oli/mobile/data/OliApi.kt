@@ -403,6 +403,50 @@ class OliApi private constructor() {
             }
         }
 
+    // ---------------------------------------------------------------- images
+
+    /**
+     * Sends raw image bytes (the new /api/files/upload endpoint) and returns the stored
+     * path inside the user's workspace, e.g. "images/2026-11-23-photo.jpg".
+     */
+    suspend fun uploadImage(fileName: String, bytes: ByteArray): String = withContext(Dispatchers.IO) {
+        val safe = fileName.replace("\"", "").ifBlank { "photo.jpg" }
+        val conn = open("/api/files/upload?name=" + URLEncoder.encode(safe, "UTF-8"), "POST", null, null)
+        conn.setRequestProperty("Content-Type", "application/octet-stream")
+        conn.doOutput = true
+        conn.setFixedLengthStreamingMode(bytes.size)
+        try {
+            conn.outputStream.use { it.write(bytes) }
+            val json = JSONObject(read(conn))
+            val path = json.optString("path")
+            if (path.isBlank()) throw ApiException(json.optString("error", "Не удалось загрузить изображение"))
+            path
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    /** Asks the server to analyse an uploaded image; the answer arrives as chat text. */
+    suspend fun vision(path: String, question: String): ChatReply {
+        val json = call("/api/vision", "POST", JSONObject().put("path", path).put("question", question))
+        json.optJSONObject("usage")?.let { u ->
+            UsageSnapshot.hourUsed = u.optLong("hourUsed")
+            UsageSnapshot.hourLimit = u.optInt("hourLimit")
+            UsageSnapshot.dayUsed = u.optLong("dayUsed")
+            UsageSnapshot.dayLimit = u.optInt("dayLimit")
+            UsageSnapshot.activeUsers = u.optInt("activeUsers", 1)
+        }
+        UsageSnapshot.limited = json.optBoolean("limited", false)
+        UsageSnapshot.modelName = json.optString("model", "")
+        return ChatReply(
+            text = json.optString("text"),
+            files = emptyList(),
+            threadId = "",
+            limited = json.optBoolean("limited", false),
+            modelName = json.optString("model", "")
+        )
+    }
+
     companion object {
         val shared: OliApi by lazy { OliApi() }
 

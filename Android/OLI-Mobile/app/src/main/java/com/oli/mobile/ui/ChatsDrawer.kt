@@ -1,5 +1,8 @@
 package com.oli.mobile.ui
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -12,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -27,6 +31,17 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.unit.IntOffset
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -50,21 +65,44 @@ fun ChatsDrawer(
     onDelete: (String) -> Unit,
     onSettings: () -> Unit
 ) {
+    val haptics = LocalHapticFeedback.current
+    val scope = rememberCoroutineScope()
+
+    // The panel slides in from the left and can be flicked back out (swipe left).
+    val slide = remember { Animatable(-1f) }
+    LaunchedEffect(Unit) { slide.animateTo(0f, tween(260)) }
+    fun close() {
+        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        scope.launch {
+            slide.animateTo(-1f, tween(180))
+            onDismiss()
+        }
+    }
+
     Box(Modifier.fillMaxSize()) {
-        // scrim
+        // scrim, fading in with the panel
         Box(
             Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.6f))
-                .clickable(onClick = onDismiss)
+                .background(Color.Black.copy(alpha = 0.6f * (1f + slide.value)))
+                .clickable(onClick = ::close)
         )
 
         Column(
             Modifier
                 .fillMaxHeight()
                 .fillMaxWidth(0.84f)
+                .offset { IntOffset((slide.value * 900f).toInt(), 0) }
                 .background(OliSurface)
                 .border(1.dp, OliOutline.copy(alpha = 0.6f))
+                .pointerInput(Unit) {
+                    var total = 0f
+                    detectHorizontalDragGestures(
+                        onDragStart = { total = 0f },
+                        onDragEnd = { if (total < -80f) close() },
+                        onDragCancel = { total = 0f }
+                    ) { _, dragAmount -> total += dragAmount }
+                }
         ) {
             Column(Modifier.statusBarsPadding().padding(16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -97,7 +135,7 @@ fun ChatsDrawer(
                         .clip(RoundedCornerShape(14.dp))
                         .background(OliBlue.copy(alpha = 0.16f))
                         .border(1.dp, OliBlue.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
-                        .clickable(onClick = onNew)
+                        .clickable { haptics.performHapticFeedback(HapticFeedbackType.LongPress); onNew() }
                         .padding(horizontal = 14.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
