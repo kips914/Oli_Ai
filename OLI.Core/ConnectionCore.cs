@@ -148,14 +148,21 @@ public static class ConnectionCore
         }
     }
 
-    /// <summary>Cheap shape test: "host:port" or "host".</summary>
+    /// <summary>
+    /// Cheap shape test for a typed address: "host:port" or a dotted host. A single word
+    /// ("привет") must not be mistaken for an address, otherwise every typo becomes a
+    /// connection attempt and the user gets a confusing "компьютер не ответил".
+    /// </summary>
     private static bool LooksLikeAddress(string text)
     {
         if (text.Length is < 3 or > 300) return false;
         if (text.Contains(' ')) return false;
-        var host = text.Contains(':') ? text[..text.LastIndexOf(':')] : text;
+        var hasPort = text.Contains(':');
+        var host = hasPort ? text[..text.LastIndexOf(':')] : text;
         if (host.Length == 0) return false;
-        return host.All(c => char.IsLetterOrDigit(c) || c is '.' or '-' or '_');
+        if (!host.All(c => char.IsLetterOrDigit(c) || c is '.' or '-' or '_')) return false;
+        // "192.168.1.10", "my-pc.local", "localhost" or anything with an explicit port.
+        return hasPort || host.Contains('.') || host.Equals("localhost", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string ToBase64Url(byte[] bytes) =>

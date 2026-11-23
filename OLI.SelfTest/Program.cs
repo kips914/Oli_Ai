@@ -342,6 +342,11 @@ Check("plain address is accepted instead of a code",
 Check("plain https address is accepted",
     () => ConnectionCore.ParseJoinCode("https://x.trycloudflare.com")?.Address == "https://x.trycloudflare.com");
 Check("garbage is not a join code", () => ConnectionCore.ParseJoinCode("hello world") is null);
+Check("a single word is not treated as an address", () => ConnectionCore.ParseJoinCode("привет") is null);
+Check("a bare host name with a dot is an address",
+    () => ConnectionCore.ParseJoinCode("my-pc.local")?.Address == "http://my-pc.local");
+Check("localhost with a port is an address",
+    () => ConnectionCore.ParseJoinCode("localhost:6767")?.Address == "http://localhost:6767");
 Check("broken base64 is not a join code", () => ConnectionCore.ParseJoinCode("OLI1@@@") is null);
 
 Console.WriteLine("ConnectionCore · health classification");
@@ -541,7 +546,7 @@ await using (var live = new OLI.Server.ServerHost(new OLI.Server.ServerOptions
     Check("the failed turn still created (and titled) a thread", () =>
         threads.Count == 1 && threads[0].Title.StartsWith("Как дела"));
 
-    var loaded = threads.Count > 0 ? await client.LoadChatAsync(threads[0].Id) : [];
+    IReadOnlyList<ChatEntry> loaded = threads.Count > 0 ? await client.LoadChatAsync(threads[0].Id) : [];
     Check("the user's message is stored once", () => loaded.Count(m => m.Role == ChatRole.User) == 1);
     Check("no empty assistant bubble is stored", () => loaded.All(m => m.Role != ChatRole.Assistant || m.Text.Length > 0));
 

@@ -123,8 +123,11 @@ class OliApi private constructor() {
         if (raw.isEmpty()) return null
 
         // A plain address is accepted too: "192.168.1.10:6767", "https://x.trycloudflare.com".
-        val looksLikeUrl = raw.contains("://") ||
-            raw.matches(Regex("^[A-Za-z0-9._-]+(:\\d{1,5})?$"))
+        // Same shape rule as ConnectionCore.LooksLikeAddress: a single word ("привет") is
+        // not an address, otherwise every typo becomes a silent connection attempt.
+        val looksLikeUrl = raw.contains("://") || raw.matches(Regex("^[A-Za-z0-9._-]+:\d{1,5}$")) ||
+            raw.matches(Regex("^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)+$")) ||
+            raw.equals("localhost", ignoreCase = true)
         if (looksLikeUrl) {
             val address = normalize(raw)
             return if (address.isBlank()) null else address to ""
