@@ -70,11 +70,10 @@ public static class ImageAnalyzer
 
         if (facts.Count == 0) facts.Add("размер определить не удалось — файл может быть повреждён");
 
-        var palette = Palette(bytes);
-        if (palette is not null)
+        if (Palette(bytes) is { } palette)
         {
-            facts.Add($"основные цвета по пикселям: {palette.Value.Colors}");
-            facts.Add(palette.Value.Light
+            facts.Add($"основные цвета по пикселям: {palette.Colors}");
+            facts.Add(palette.Light
                 ? "в целом изображение светлое (много белого/светлого фона)"
                 : "в целом изображение тёмное (тёмный фон или ночной кадр)");
         }
