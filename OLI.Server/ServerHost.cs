@@ -236,6 +236,18 @@ public sealed class ServerHost : IAsyncDisposable
             return Results.Json(new { ok = true });
         });
 
+        app.MapPost("/api/profile", async (UpdateProfileRequest request, HttpContext http) =>
+        {
+            var account = CurrentAccount(http);
+            if (account is null) return Unauthorized();
+
+            var (ok, error) = await _accounts.UpdateDisplayNameAsync(account.Id, request.DisplayName ?? "");
+            if (!ok) return Results.Json(new { error }, statusCode: 400);
+
+            var updated = _accounts.FindById(account.Id)!;
+            return Results.Json(new { ok = true, user = ToProfile(updated) });
+        });
+
         app.MapPost("/api/password", async (ChangePasswordRequest request, HttpContext http) =>
         {
             var account = CurrentAccount(http);
@@ -827,6 +839,7 @@ public sealed class ServerHost : IAsyncDisposable
     public sealed record RegisterRequest(string? UserName, string? Password, string? DisplayName, string? InviteCode);
     public sealed record LoginRequest(string? UserName, string? Password);
     public sealed record ChangePasswordRequest(string? OldPassword, string? NewPassword);
+    public sealed record UpdateProfileRequest(string? DisplayName);
     public sealed record ChatRequestDto(string? Message, string? ThreadId);
     public sealed record ModelChoiceRequest(string? ModelId);
     public sealed record NewChatRequest(string? Title, string? ModelId);

@@ -53,7 +53,9 @@ fun SettingsScreen(
     onSignedOut: () -> Unit,
     onExitDemo: () -> Unit,
     onBack: () -> Unit = {},
-    onOpenAbout: () -> Unit = {}
+    onOpenAbout: () -> Unit = {},
+    onOpenStorage: () -> Unit = {},
+    onOpenProfile: () -> Unit = {}
 ) {
     var ownServer by remember { mutableStateOf(repo.usingOwnServer) }
     var serverField by remember { mutableStateOf(repo.customServer) }
@@ -299,6 +301,16 @@ fun SettingsScreen(
         }
 
         Spacer(Modifier.height(16.dp))
+        Text("Данные", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(onClick = onOpenStorage, modifier = Modifier.fillMaxWidth()) {
+            Text("📂 Хранилище (файлы и квота)")
+        }
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(onClick = onOpenProfile, modifier = Modifier.fillMaxWidth()) {
+            Text("👤 Профиль и имя")
+        }
+        Spacer(Modifier.height(8.dp))
         OutlinedButton(onClick = onOpenAbout, modifier = Modifier.fillMaxWidth()) {
             Text("Возможности OLI")
         }

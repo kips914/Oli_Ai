@@ -91,13 +91,6 @@ fun AboutScreen(onBack: () -> Unit) {
                 }
             }
 
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "OLI — это ваш собственный ассистент. Он не называет модель, на которой работает, " +
-                    "и не раскрывает внутренние детали — просто помогает.",
-                style = MaterialTheme.typography.labelSmall,
-                color = OliTextMuted
-            )
             Spacer(Modifier.height(24.dp))
         }
     }

@@ -158,6 +158,11 @@ class OliApi private constructor() {
     suspend fun changePassword(old: String, new: String): JSONObject =
         call("/api/password", "POST", JSONObject().put("oldPassword", old).put("newPassword", new))
 
+    suspend fun updateProfile(displayName: String): UserProfile {
+        val json = call("/api/profile", "POST", JSONObject().put("displayName", displayName))
+        return UserProfile.from(json.optJSONObject("user") ?: JSONObject())
+    }
+
     // ---------------------------------------------------------------- chat
 
     suspend fun chat(message: String, threadId: String?): ChatReply {

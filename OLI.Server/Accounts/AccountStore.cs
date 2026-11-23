@@ -340,6 +340,26 @@ public sealed class AccountStore
         finally { _gate.Release(); }
     }
 
+    /// <summary>Lets the user rename themselves (display name only, never the login).</summary>
+    public async Task<(bool Ok, string? Error)> UpdateDisplayNameAsync(string accountId, string displayName)
+    {
+        var name = (displayName ?? "").Trim();
+        if (name.Length < 2) return (false, "Имя слишком короткое.");
+        if (name.Length > 40) return (false, "Имя слишком длинное (до 40 символов).");
+        if (name.Any(char.IsControl)) return (false, "В имени есть недопустимые символы.");
+
+        await _gate.WaitAsync();
+        try
+        {
+            var account = _db.Accounts.FirstOrDefault(a => a.Id == accountId);
+            if (account is null) return (false, "Пользователь не найден.");
+            account.DisplayName = name;
+            await PersistAsync();
+            return (true, null);
+        }
+        finally { _gate.Release(); }
+    }
+
     public async Task<bool> SetModelAsync(string accountId, string modelId)
     {
         await _gate.WaitAsync();

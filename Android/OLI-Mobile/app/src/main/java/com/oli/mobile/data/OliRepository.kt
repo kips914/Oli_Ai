@@ -264,6 +264,23 @@ class OliRepository(private val context: Context) {
         }
     }
 
+    /** Renames the user (display name only). Returns the updated profile or throws. */
+    suspend fun updateDisplayName(name: String): UserProfile {
+        if (isDemo) {
+            val current = (session.value as? Session.SignedIn)?.user
+            val updated = (current ?: UserProfile("demo", "гость", name, 0, false))
+                .copy(displayName = name)
+            _session.value = Session.SignedIn(updated)
+            return updated
+        }
+        val updated = api.updateProfile(name)
+        creds.displayName = updated.displayName
+        _session.value = Session.SignedIn(updated)
+        return updated
+    }
+
+    val serverEndpoint: String get() = api.baseUrl
+
     suspend fun changePassword(old: String, new: String) {
         api.changePassword(old, new)
         val result = api.login(creds.lastEndpoint, creds.userName, new)

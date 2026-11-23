@@ -134,7 +134,7 @@ fun FilesScreen(
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
             }
             Column(Modifier.weight(1f)) {
-                Text("Файлы", style = MaterialTheme.typography.titleMedium)
+                Text("Хранилище", style = MaterialTheme.typography.titleMedium)
                 Text(
                     "/" + path,
                     style = MaterialTheme.typography.labelSmall,

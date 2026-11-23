@@ -12,8 +12,8 @@ android {
         applicationId = "com.oli.mobile"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "1.10.0"
+        versionCode = 6
+        versionName = "1.10.1"
 
         // The server the app connects to by itself (the OLI cloud server behind the app).
         // Override at build time, e.g. -POLI_DEFAULT_SERVER=http://192.168.1.10:8765

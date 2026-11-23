@@ -79,6 +79,7 @@ fun ChatScreen(
     busy: Boolean,
     displayName: String,
     demo: Boolean,
+    userInitial: String,
     modelState: ModelState?,
     usageLimits: UsageSnapshotData?,
     chats: List<ChatSummary>,
@@ -87,6 +88,7 @@ fun ChatScreen(
     onOpenFiles: () -> Unit,
     onExitDemo: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenProfile: () -> Unit,
     onPickModel: (String) -> Unit,
     onOpenChat: (String?) -> Unit,
     onDeleteChat: (String) -> Unit,
@@ -140,10 +142,10 @@ fun ChatScreen(
 
             TopBar(
                 modelTitle = selectedModel?.title ?: "Olim Pass",
-                modelSubtitle = "k3",
+                userInitial = userInitial,
                 onMenu = { drawerOpen = true },
                 onModel = { modelsOpen = true },
-                onFiles = onOpenFiles,
+                onProfile = onOpenProfile,
                 onNewChat = { scope.launch { repo.newChat() } }
             )
 
@@ -213,10 +215,10 @@ fun ChatScreen(
 @Composable
 private fun TopBar(
     modelTitle: String,
-    modelSubtitle: String,
+    userInitial: String,
     onMenu: () -> Unit,
     onModel: () -> Unit,
-    onFiles: () -> Unit,
+    onProfile: () -> Unit,
     onNewChat: () -> Unit
 ) {
     Row(
@@ -240,12 +242,18 @@ private fun TopBar(
 
         Spacer(Modifier.weight(1f))
 
-        GlassCircleButton(onClick = onFiles) {
-            Icon(Icons.Filled.GraphicEq, contentDescription = "Файлы", tint = OliBlueBright, modifier = Modifier.size(19.dp))
+        GlassCircleButton(onClick = onNewChat) {
+            Icon(Icons.Filled.Add, contentDescription = "Новый чат", tint = OliText, modifier = Modifier.size(21.dp))
         }
         Spacer(Modifier.width(8.dp))
-        GlassCircleButton(onClick = onMenu) {
-            Icon(Icons.Filled.Add, contentDescription = "Новый чат", tint = OliText, modifier = Modifier.size(21.dp))
+
+        // profile avatar (top-right)
+        Box(
+            Modifier.size(44.dp).clip(CircleShape).border(1.dp, OliOutline.copy(alpha = 0.8f), CircleShape)
+                .clickable(onClick = onProfile),
+            contentAlignment = Alignment.Center
+        ) {
+            Avatar(initial = userInitial, size = 40, ring = false)
         }
     }
 }
@@ -648,51 +656,6 @@ internal fun GhostButton(text: String, onClick: () -> Unit, accent: Boolean = fa
             color = if (accent) OliBlueBright else OliText,
             modifier = Modifier.padding(horizontal = 22.dp, vertical = 11.dp)
         )
-    }
-}
-
-/** Floating glass navigation bar in the OLI palette (used by the app shell). */
-@Composable
-fun OliBottomBar(
-    current: Int,
-    labels: List<Pair<androidx.compose.ui.graphics.vector.ImageVector, String>>,
-    onSelect: (Int) -> Unit
-) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-            .clip(RoundedCornerShape(24.dp))
-            .background(OliGlass)
-            .border(1.dp, OliOutline.copy(alpha = 0.8f), RoundedCornerShape(24.dp))
-            .padding(6.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        labels.forEachIndexed { index, (icon, label) ->
-            val selected = index == current
-            Row(
-                Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(if (selected) OliBlue.copy(alpha = 0.16f) else Color.Transparent)
-                    .clickable { onSelect(index) }
-                    .padding(vertical = 10.dp),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    icon,
-                    contentDescription = label,
-                    tint = if (selected) OliBlueBright else OliTextMuted,
-                    modifier = Modifier.size(20.dp)
-                )
-                if (selected) {
-                    Spacer(Modifier.width(8.dp))
-                    Text(label, style = MaterialTheme.typography.labelMedium, color = OliText)
-                }
-            }
-        }
     }
 }
 

@@ -7,12 +7,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Chat
-import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -24,16 +19,15 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import com.oli.mobile.data.OliRepository
 import com.oli.mobile.data.UserProfile
+import com.oli.mobile.ui.AboutScreen
 import com.oli.mobile.ui.AuthScreen
 import com.oli.mobile.ui.ChatScreen
 import com.oli.mobile.ui.FilesScreen
-import com.oli.mobile.ui.OliBottomBar
-import com.oli.mobile.ui.OliInk
 import com.oli.mobile.ui.OliTheme
+import com.oli.mobile.ui.ProfileScreen
 import com.oli.mobile.ui.SettingsScreen
 import kotlinx.coroutines.launch
 
@@ -51,14 +45,11 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/** Bottom bar keeps only the two daily screens; everything else lives in the drawer. */
-private enum class Tab(val label: String, val icon: ImageVector) {
-    Chat("Чат", Icons.Filled.Chat),
-    Files("Файлы", Icons.Filled.Folder)
-}
-
-/** Screens pushed on top of the tabs (no bottom bar). */
-private enum class Overlay { None, Settings, About }
+/**
+ * There is no bottom bar any more: the chat is the app. Everything else opens as a
+ * full screen from the header (avatar → profile) or from the chats drawer (settings).
+ */
+private enum class Screen { Chat, Files, Settings, Profile, About }
 
 @Composable
 private fun OliApp() {
@@ -75,8 +66,7 @@ private fun OliApp() {
     val activeThread by repo.activeThread.collectAsState()
     val limitNotice by repo.limitNotice.collectAsState()
 
-    var tab by remember { mutableStateOf(Tab.Chat) }
-    var overlay by remember { mutableStateOf(Overlay.None) }
+    var screen by remember { mutableStateOf(Screen.Chat) }
     var filesPath by remember { mutableStateOf("") }
     val scope = rememberCoroutineScope()
 
@@ -89,12 +79,10 @@ private fun OliApp() {
         }
     }
 
-    BackHandler(enabled = tab != Tab.Chat || filesPath.isNotEmpty() || overlay != Overlay.None) {
+    BackHandler(enabled = screen != Screen.Chat || filesPath.isNotEmpty()) {
         when {
-            overlay != Overlay.None -> overlay = Overlay.None
-            tab == Tab.Files && filesPath.isNotEmpty() -> filesPath = filesPath.substringBeforeLast('/', "")
-            tab != Tab.Chat -> tab = Tab.Chat
-            else -> filesPath = ""
+            screen == Screen.Files && filesPath.isNotEmpty() -> filesPath = filesPath.substringBeforeLast('/', "")
+            else -> screen = Screen.Chat
         }
     }
 
@@ -106,7 +94,7 @@ private fun OliApp() {
         is OliRepository.Session.SignedOut -> AuthScreen(
             repo = repo,
             defaultServerOffline = offline,
-            onDemo = { repo.enterDemo(); tab = Tab.Chat }
+            onDemo = { repo.enterDemo(); screen = Screen.Chat }
         )
 
         else -> {
@@ -115,64 +103,72 @@ private fun OliApp() {
                 is OliRepository.Session.SignedIn -> state.user
                 else -> UserProfile("demo", "гость", "Гость", 1024L * 1024 * 1024, false)
             }
+            val initial = (user.displayName.ifBlank { user.userName }).trim().take(1).uppercase().ifBlank { "O" }
 
-            when (overlay) {
-                Overlay.Settings -> SettingsScreen(
+            when (screen) {
+                Screen.Chat -> ChatScreen(
+                    repo = repo,
+                    messages = messages,
+                    busy = busy,
+                    displayName = if (demo) "гость" else user.displayName,
+                    demo = demo,
+                    userInitial = initial,
+                    modelState = models,
+                    usageLimits = limits,
+                    chats = chats,
+                    activeThread = activeThread,
+                    limitNotice = limitNotice,
+                    onOpenFiles = { filesPath = ""; screen = Screen.Files },
+                    onExitDemo = { repo.exitDemo() },
+                    onOpenSettings = { screen = Screen.Settings },
+                    onOpenProfile = { screen = Screen.Profile },
+                    onPickModel = { id -> scope.launch { repo.chooseModel(id) } },
+                    onOpenChat = { id -> scope.launch { repo.openChat(id) } },
+                    onDeleteChat = { id -> scope.launch { repo.deleteChat(id) } },
+                    onDismissLimit = { repo.dismissLimitNotice() }
+                )
+
+                Screen.Files -> FilesScreen(
+                    repo = repo,
+                    usage = if (demo) null else usage,
+                    demo = demo,
+                    path = filesPath,
+                    onPathChange = { filesPath = it },
+                    onBack = { screen = Screen.Chat }
+                )
+
+                Screen.Settings -> SettingsScreen(
                     repo = repo,
                     user = user,
                     usagePercent = usage?.percent ?: 0.0,
                     demo = demo,
-                    onSignedOut = { overlay = Overlay.None },
-                    onExitDemo = { repo.exitDemo(); overlay = Overlay.None },
-                    onBack = { overlay = Overlay.None },
-                    onOpenAbout = { overlay = Overlay.About }
+                    onSignedOut = { screen = Screen.Chat },
+                    onExitDemo = { repo.exitDemo(); screen = Screen.Chat },
+                    onBack = { screen = Screen.Chat },
+                    onOpenAbout = { screen = Screen.About },
+                    onOpenStorage = { filesPath = ""; screen = Screen.Files },
+                    onOpenProfile = { screen = Screen.Profile }
                 )
 
-                Overlay.About -> com.oli.mobile.ui.AboutScreen(onBack = { overlay = Overlay.None })
-
-                Overlay.None -> Scaffold(
-                    containerColor = OliInk,
-                    bottomBar = {
-                        OliBottomBar(
-                            current = tab.ordinal,
-                            labels = Tab.entries.map { it.icon to it.label },
-                            onSelect = { tab = Tab.entries[it] }
-                        )
-                    }
-                ) { padding ->
-                    Box(Modifier.fillMaxSize().padding(padding)) {
-                        when (tab) {
-                            Tab.Chat -> ChatScreen(
-                                repo = repo,
-                                messages = messages,
-                                busy = busy,
-                                displayName = if (demo) "гость" else user.displayName,
-                                demo = demo,
-                                modelState = models,
-                                usageLimits = limits,
-                                chats = chats,
-                                activeThread = activeThread,
-                                limitNotice = limitNotice,
-                                onOpenFiles = { filesPath = ""; tab = Tab.Files },
-                                onExitDemo = { repo.exitDemo() },
-                                onOpenSettings = { overlay = Overlay.Settings },
-                                onPickModel = { id -> scope.launch { repo.chooseModel(id) } },
-                                onOpenChat = { id -> scope.launch { repo.openChat(id) } },
-                                onDeleteChat = { id -> scope.launch { repo.deleteChat(id) } },
-                                onDismissLimit = { repo.dismissLimitNotice() }
-                            )
-
-                            Tab.Files -> FilesScreen(
-                                repo = repo,
-                                usage = if (demo) null else usage,
-                                demo = demo,
-                                path = filesPath,
-                                onPathChange = { filesPath = it },
-                                onBack = { tab = Tab.Chat }
-                            )
+                Screen.Profile -> ProfileScreen(
+                    repo = repo,
+                    user = user,
+                    usage = limits,
+                    filesUsedBytes = usage?.used ?: 0L,
+                    filesQuotaBytes = usage?.quota ?: (1024L * 1024 * 1024),
+                    demo = demo,
+                    onBack = { screen = Screen.Chat },
+                    onOpenStorage = { filesPath = ""; screen = Screen.Files },
+                    onOpenSettings = { screen = Screen.Settings },
+                    onLogout = {
+                        scope.launch {
+                            repo.logout(forgetPassword = false)
+                            screen = Screen.Chat
                         }
                     }
-                }
+                )
+
+                Screen.About -> AboutScreen(onBack = { screen = Screen.Settings })
             }
         }
     }

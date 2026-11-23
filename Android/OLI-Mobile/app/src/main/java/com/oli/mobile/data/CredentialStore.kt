@@ -95,7 +95,7 @@ class CredentialStore private constructor(private val context: Context) {
 
     var displayName: String
         get() = kv.str(KEY_DISPLAY) ?: ""
-        private set(value) = kv.put(KEY_DISPLAY, value)
+        set(value) = kv.put(KEY_DISPLAY, value)
 
     var rememberMe: Boolean
         get() = kv.bool(KEY_REMEMBER) ?: true

@@ -36,7 +36,7 @@ import com.oli.mobile.data.UsageSnapshotData
 
 /**
  * Bottom sheet with the OLI model list and the live token limit.
- * Olim Pass — flagship (k3.pass), Olim Son — light model (k3.son), used after the limit.
+ * Olim Pass — flagship, Olim Son — the light model used after the limit.
  */
 @Composable
 fun ModelSheet(
@@ -131,7 +131,7 @@ fun ModelSheet(
                                 fontWeight = FontWeight.SemiBold)
                             Spacer(Modifier.width(8.dp))
                             Text(
-                                if (isPass) "k3.pass" else "k3.son",
+                                if (isPass) "флагман" else "лёгкая",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = if (isPass) OliBlueBright else OliCyan
                             )
