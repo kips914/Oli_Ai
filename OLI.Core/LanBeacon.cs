@@ -46,8 +46,17 @@ public sealed class LanBeacon : IDisposable
             try
             {
                 // 255.255.255.255 reaches every interface that allows broadcast; the
-                // subnet-broadcast addresses are tried as a fallback for locked-down Wi-Fi.
-                await client.SendAsync(payload, payload.Length, new IPEndPoint(IPAddress.Broadcast, ConnectionCore.BeaconPort));
+                // subnet-broadcast addresses are the real fallback for locked-down Wi-Fi,
+                // where the global broadcast is dropped by the access point.
+                try
+                {
+                    await client.SendAsync(payload, payload.Length, new IPEndPoint(IPAddress.Broadcast, ConnectionCore.BeaconPort));
+                }
+                catch (SocketException)
+                {
+                    // The global broadcast is not routed on this machine; nothing to log.
+                }
+
                 foreach (var subnetBroadcast in NetworkAddresses.BroadcastAddresses())
                 {
                     try { await client.SendAsync(payload, payload.Length, new IPEndPoint(subnetBroadcast, ConnectionCore.BeaconPort)); }
@@ -66,10 +75,13 @@ public sealed class LanBeacon : IDisposable
 
     public void Dispose()
     {
-        try { _cts?.Cancel(); } catch { }
-        _cts?.Dispose();
-        _cts = null;
+        var loop = _loop;
+        var cts = _cts;
         _loop = null;
+        _cts = null;
+        try { cts?.Cancel(); } catch { /* already stopped */ }
+        try { loop?.Wait(TimeSpan.FromMilliseconds(500)); } catch { /* best effort */ }
+        cts?.Dispose();
     }
 }
 

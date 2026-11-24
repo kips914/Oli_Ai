@@ -236,6 +236,17 @@ class OliRepository(private val context: Context) {
         // Last resort: maybe this PC is running the OLI server right next to the phone.
         _discovering.value = true
         try {
+            // The beacon carries the real port; a scan can only guess the default one.
+            for (server in BeaconScanner.find()) {
+                val health = runCatching { api.health(server.url) }.getOrNull()
+                if (health != null && health.ok) {
+                    api.baseUrl = server.url
+                    creds.rememberEndpoint(server.url)
+                    _defaultServerOffline.value = false
+                    return health
+                }
+            }
+
             val found = LanScanner.findServer(port = DEFAULT_PORT)
             if (found != null) {
                 val health = runCatching { api.health(found) }.getOrNull()

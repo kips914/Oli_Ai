@@ -10,7 +10,11 @@ data class ServerHealth(
     /** True when the answer came in one piece (tunnel) instead of a local Wi-Fi socket. */
     val viaInternet: Boolean = false,
     /** "ollama" or "llama.cpp" — the engine running on the PC. */
-    val engine: String = ""
+    val engine: String = "",
+    /** Port the PC really listens on (discovery does not have to guess 8765). */
+    val port: Int = 0,
+    /** PC name from /api/health, shown in settings as "куда я подключён". */
+    val name: String = ""
 )
 
 data class UserProfile(

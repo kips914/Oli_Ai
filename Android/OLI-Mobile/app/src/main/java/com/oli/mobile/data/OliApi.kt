@@ -95,7 +95,9 @@ class OliApi private constructor() {
                     registration = json.optBoolean("registration", true),
                     llama = json.optBoolean("llama", false),
                     viaInternet = target.startsWith("https://"),
-                    engine = json.optString("engine")
+                    engine = json.optString("engine"),
+                    port = json.optInt("port"),
+                    name = json.optString("name")
                 )
             } finally {
                 conn.disconnect()
