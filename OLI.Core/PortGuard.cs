@@ -81,22 +81,48 @@ public static class PortGuard
     /// True when an OLI server (not some other app) answers on this port. This is the one
     /// question worth asking before starting a second copy: a live OLI should be reused,
     /// while a foreign program just means "pick another port".
+    ///
+    /// Two addresses are tried because they answer for different reasons: <c>/</c> is a fixed
+    /// JSON banner (fast, no dependencies), while <c>/api/health</c> also probes the model
+    /// engine and can be slow or briefly failing while the engine is loading. Relying on
+    /// health alone made a working OLI look like a stranger.
     /// </summary>
     public static async Task<bool> OliAnswersAsync(int port, CancellationToken ct = default)
     {
         if (port is < 1 or > 65535) return false;
-        try
+
+        foreach (var path in new[] { "/", "/api/health" })
         {
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
-            using var response = await http.GetAsync($"http://127.0.0.1:{port}/api/health", ct);
-            if (!response.IsSuccessStatusCode) return false;
-            var body = await response.Content.ReadAsStringAsync(ct);
-            return body.Contains("\"service\":\"oli-server\"", StringComparison.OrdinalIgnoreCase);
+            for (var attempt = 0; attempt < 2; attempt++)
+            {
+                if (attempt > 0)
+                {
+                    try { await Task.Delay(200, ct); } catch (OperationCanceledException) { return false; }
+                }
+
+                try
+                {
+                    using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(4) };
+                    using var response = await http.GetAsync($"http://127.0.0.1:{port}{path}", ct);
+                    if (!response.IsSuccessStatusCode) continue;
+                    var body = await response.Content.ReadAsStringAsync(ct);
+                    if (body.Contains("oli-server", StringComparison.OrdinalIgnoreCase) ||
+                        body.Contains("OLI Server", StringComparison.OrdinalIgnoreCase))
+                        return true;
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    return false;
+                }
+                catch
+                {
+                    // Try the next address / attempt: a foreign program, or a server that is
+                    // still warming up.
+                }
+            }
         }
-        catch
-        {
-            return false;
-        }
+
+        return false;
     }
 
     /// <summary>
