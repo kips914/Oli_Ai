@@ -84,7 +84,11 @@
                     <Button x:Name="TunnelLogButton" Content="Журнал" Click="TunnelLog_Click"
                             Style="{StaticResource GhostButton}" Margin="0,0,8,0"/>
                     <Button x:Name="PhoneTestButton" Content="📱 Проверить путь телефона" Click="PhoneTest_Click"
-                            Style="{StaticResource AccentButton}" ToolTip="Проверит сервер так же, как это делает приложение на телефоне"/>
+                            Style="{StaticResource AccentButton}" ToolTip="Проверит сервер так же, как это делает приложение на телефоне"
+                            Margin="0,0,8,0"/>
+                    <Button x:Name="SetupButton" Content="🧰 Установка и проверка" Click="Setup_Click"
+                            Style="{StaticResource GhostButton}"
+                            ToolTip="Скачает недостающие компоненты (cloudflared) и пройдёт мини-тест подключения"/>
                 </StackPanel>
             </Grid>
         </Border>

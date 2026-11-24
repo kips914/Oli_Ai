@@ -248,6 +248,28 @@ public partial class AdminWindow : Window
         }
     }
 
+    /// <summary>
+    /// Re-runs the first-launch wizard: components (cloudflared), firewall, tunnel and the
+    /// mini connectivity test. This is the "why doesn't my phone connect" button for the PC.
+    /// </summary>
+    private void Setup_Click(object sender, RoutedEventArgs e)
+    {
+        var settings = SettingsStore.Load();
+        var window = new SetupWindow(
+            settings,
+            async () =>
+            {
+                if (!_host.IsRunning) await _host.StartAsync();
+            },
+            async port => await Task.Run(() => FirewallHelper.EnsurePortOpen(port) is null),
+            async () => _tunnel.IsRunning ? _tunnel.PublicUrl : null)
+        {
+            Owner = this,
+        };
+        window.ShowDialog();
+        RefreshTunnelState();
+    }
+
     // ------------------------------------------------------------- phone test
 
     /// <summary>

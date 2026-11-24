@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Media;
 using System.Windows.Threading;
 using OLI.Core;
+using OLI.Server;
 
 namespace OLI.Client;
 
@@ -16,6 +17,29 @@ public partial class App : Application
         {
             if (args.ExceptionObject is Exception ex) OliLog.Error("APP", ex.ToString());
         };
+
+        // First launch (or a version upgrade): install the tunnel binary, open the port and
+        // run the mini connectivity test before the chat appears. Without this the user had
+        // to discover by hand that cloudflared.exe was missing, which is why the tunnel
+        // "did not start" on a fresh install.
+        try
+        {
+            var settings = SettingsStore.Load();
+            AppPaths.EnsureDirectories();
+            if (!settings.SetupCompleted || settings.SetupVersion != AppVersion.Current)
+            {
+                var setup = new SetupWindow(settings, StartServerForSetupAsync, OpenFirewallAsync, StartTunnelForSetupAsync);
+                var proceed = setup.ShowDialog();
+                // "Продолжить всё равно" is a valid choice: OLI works over Wi-Fi without the
+                // tunnel, and the user can re-run the check from the admin panel later.
+                _ = proceed;
+            }
+        }
+        catch (Exception ex)
+        {
+            // A broken setup must never block the app: the chat is the main feature.
+            OliLog.Error("APP", "Первая настройка не завершилась: " + ex);
+        }
 
         // Startup window is created by hand (no StartupUri) so that a broken resource
         // dictionary or a missing file shows a readable message instead of a silent crash.
@@ -38,6 +62,85 @@ public partial class App : Application
         }
 
         base.OnStartup(e);
+    }
+
+    // ------------------------------------------------------------------ setup hooks
+
+    private static ServerHost? _setupServer;
+
+    /// <summary>
+    /// Starts the server for the setup window. The chat window owns its own instance, so a
+    /// server started here is stopped right after the check — otherwise the port would be
+    /// taken and the real server would fail to start with "address already in use".
+    /// </summary>
+    private static async Task StartServerForSetupAsync()
+    {
+        var settings = SettingsStore.Load();
+        _setupServer = new ServerHost(new ServerOptions
+        {
+            DataRoot = Path.Combine(AppPaths.DataRoot, "server"),
+            Host = settings.Server.Host,
+            Port = settings.Server.Port,
+            LlamaBaseUrl = settings.LlamaBaseUrl,
+            Model = settings.Model,
+            AllowRegistration = settings.Server.AllowRegistration,
+            InviteCode = settings.Server.InviteCode,
+            UserQuotaBytes = settings.Server.UserQuotaBytes,
+            AdminToken = settings.Server.AdminToken,
+            Tunnel = settings.Server.Tunnel,
+        });
+        await _setupServer.StartAsync();
+    }
+
+    private static async Task<bool> OpenFirewallAsync(int port)
+    {
+        var result = await Task.Run(() => FirewallHelper.EnsurePortOpen(port));
+        return result is null;
+    }
+
+    /// <summary>Starts (and keeps) the tunnel for the setup check, returning its public URL.</summary>
+    private static async Task<string?> StartTunnelForSetupAsync()
+    {
+        var settings = SettingsStore.Load();
+        if (!settings.Server.Tunnel.Enabled && string.IsNullOrWhiteSpace(settings.Server.Tunnel.LastPublicUrl))
+        {
+            // The user never asked for the tunnel; do not expose the PC behind their back.
+            return null;
+        }
+
+        var manager = new TunnelManager();
+        var started = await manager.StartAsync(settings.Server.Tunnel, settings.Server.Port);
+        var url = started ? manager.PublicUrl : "";
+        // Keep the manager alive for the lifetime of the app: closing it kills cloudflared.
+        _setupTunnel = manager;
+        return url.Length > 0 ? url : null;
+    }
+
+    private static TunnelManager? _setupTunnel;
+
+    /// <summary>
+    /// The tunnel started by the setup window. <see cref="TunnelManager"/> is bound to one
+    /// server port; when the chat window starts the real server, it takes this over so the
+    /// public address stays up instead of dying with the temporary server.
+    /// </summary>
+    public static TunnelManager? TakeSetupTunnel()
+    {
+        var tunnel = _setupTunnel;
+        _setupTunnel = null;
+        return tunnel;
+    }
+
+    /// <summary>Stops the temporary server/tunnel created for the setup check.</summary>
+    public static void EndSetup()
+    {
+        // TakeSetupTunnel() sets the field to null when the chat window adopted it.
+        try { _setupTunnel?.Dispose(); } catch { /* already gone */ }
+        _setupTunnel = null;
+        if (_setupServer is not null)
+        {
+            try { _setupServer.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(3)); } catch { }
+            _setupServer = null;
+        }
     }
 
     private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)

@@ -153,6 +153,15 @@ public sealed class OliSettings
     // ---- server (PC as backend for the Android app) -----------------------
     public ServerSettings Server { get; set; } = new();
 
+    // ---- first-run setup -------------------------------------------------
+    /// <summary>
+    /// Set once the first-run setup has finished (components checked + self-test). A fresh
+    /// install shows the setup window; an existing one opens straight into the chat.
+    /// </summary>
+    public bool SetupCompleted { get; set; }
+    /// <summary>Version in which the setup last ran, so an upgrade can re-check components.</summary>
+    public string SetupVersion { get; set; } = "";
+
     // ---- misc ------------------------------------------------------------
     public string SystemPromptExtra { get; set; } = "";
     public bool CheckForUpdatesOnStartup { get; set; } = true;
