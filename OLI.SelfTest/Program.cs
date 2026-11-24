@@ -816,6 +816,30 @@ try
 finally { foreign.Stop(); }
 try { Directory.Delete(busyRoot, true); } catch { }
 
+// ------------------------------------------------------------ startup must not hang
+// 1.12.5 shipped a deadlock: OnStartup waited synchronously on an async port probe that
+// captured the UI thread's SynchronizationContext, so OLI.exe ran with no window at all.
+// These checks pin the fix: the probe always returns, with a hard per-request deadline,
+// so nothing on the startup path can wait forever for a network answer.
+Check("the port probe gives up on an unresponsive address quickly", () =>
+{
+    using var silent = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+    silent.Start(); // accepts connections but never answers HTTP
+    var port = ((System.Net.IPEndPoint)silent.LocalEndpoint).Port;
+    var watch = System.Diagnostics.Stopwatch.StartNew();
+    var answered = PortGuard.OliAnswersAsync(port, default, TimeSpan.FromMilliseconds(700))
+        .GetAwaiter().GetResult();
+    watch.Stop();
+    return !answered && watch.Elapsed < TimeSpan.FromSeconds(15);
+});
+
+Check("a probe against a closed port says 'no' instead of throwing", () =>
+{
+    var dead = FreePort();
+    return !PortGuard.OliAnswersAsync(dead, default, TimeSpan.FromMilliseconds(500))
+        .GetAwaiter().GetResult();
+});
+
 try { Directory.Delete(liveRoot, true); } catch { }
 
 static int FreePort()

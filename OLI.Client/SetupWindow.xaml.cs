@@ -24,6 +24,7 @@ public partial class SetupWindow : Window
 
     private SetupCheck? _lastCheck;
     private bool _portReleased;
+    private bool _finishing;
     private string _publicUrl = "";
     private bool _running;
 
@@ -267,24 +268,43 @@ public partial class SetupWindow : Window
         // otherwise the chat window can never start its own server ("address already in use").
         if (!_portReleased)
         {
-            App.EndSetup();
+            // App.EndSetup() blocks until the temporary server is torn down. It must not run
+            // on the UI thread: a close that waits on the dispatcher looks like a hung app.
             _portReleased = true;
+            _ = Task.Run(App.EndSetup);
         }
         base.OnClosed(e);
     }
 
     private async void Done_Click(object sender, RoutedEventArgs e)
     {
-        _settings.SetupCompleted = true;
-        _settings.SetupVersion = AppVersion.Current;
-        SettingsStore.Save(_settings);
+        // A double click used to run this whole method twice: two Save calls, two port
+        // releases and a "DialogResult can be set only after Window is created and shown"
+        // crash that took the app down right after setup. One run, then buttons stay off.
+        if (_finishing) return;
+        _finishing = true;
+        DoneButton.IsEnabled = false;
+        try
+        {
+            _settings.SetupCompleted = true;
+            _settings.SetupVersion = AppVersion.Current;
+            SettingsStore.Save(_settings);
 
-        // Free port 6767 before the chat window starts its own server: two servers on one
-        // port is the classic "сервер не запустился" after a successful setup.
-        await App.EndSetupAsync();
-        _portReleased = true;
+            // Free port 6767 before the chat window starts its own server: two servers on one
+            // port is the classic "сервер не запустился" after a successful setup.
+            await App.EndSetupAsync();
+            _portReleased = true;
 
-        DialogResult = Succeeded;
-        Close();
+            if (IsVisible) DialogResult = Succeeded;
+            Close();
+        }
+        catch (Exception ex)
+        {
+            // Never leave the user with a closed wizard and no app: report and stay open.
+            OliLog.Error("SETUP", "Завершение настройки: " + ex);
+            _finishing = false;
+            DoneButton.IsEnabled = true;
+            SummaryText.Text = "Не удалось завершить настройку: " + ex.Message;
+        }
     }
 }

@@ -87,7 +87,7 @@ public static class PortGuard
     /// engine and can be slow or briefly failing while the engine is loading. Relying on
     /// health alone made a working OLI look like a stranger.
     /// </summary>
-    public static async Task<bool> OliAnswersAsync(int port, CancellationToken ct = default)
+    public static async Task<bool> OliAnswersAsync(int port, CancellationToken ct = default, TimeSpan? perRequestTimeout = null)
     {
         if (port is < 1 or > 65535) return false;
 
@@ -102,7 +102,7 @@ public static class PortGuard
 
                 try
                 {
-                    using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(4) };
+                    using var http = new HttpClient { Timeout = perRequestTimeout ?? TimeSpan.FromSeconds(4) };
                     using var response = await http.GetAsync($"http://127.0.0.1:{port}{path}", ct);
                     if (!response.IsSuccessStatusCode) continue;
                     var body = await response.Content.ReadAsStringAsync(ct);

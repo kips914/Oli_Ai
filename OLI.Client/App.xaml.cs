@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Media;
@@ -17,6 +18,9 @@ public partial class App : Application
         {
             if (args.ExceptionObject is Exception ex) OliLog.Error("APP", ex.ToString());
         };
+
+        OliLog.Info("APP", $"Старт OLI {AppVersion.Current} ({Environment.OSVersion.VersionString})");
+        ArmStartupWatchdog();
 
         // One OLI at a time. Two copies fight for port 6767 and the second one floods the log
         // with "address already in use" — which is exactly what users reported. The second
@@ -45,10 +49,7 @@ public partial class App : Application
             // A live OLI needs no wizard: its window is about to open and the port is taken
             // on purpose. A foreign program on the port is no reason to skip the wizard —
             // the server moves to a free port by itself.
-            // Startup runs before any window exists, so a short synchronous probe here is
-            // safe: the answer is "connection refused" in microseconds, and a busy port
-            // resolves within the 2 s timeout instead of racing the main window.
-            var alreadyServing = PortGuard.OliAnswersAsync(settings.Server.Port).GetAwaiter().GetResult();
+            var alreadyServing = IsOliServing(settings.Server.Port);
             if (!alreadyServing &&
                 (!settings.SetupCompleted || settings.SetupVersion != AppVersion.Current))
             {
@@ -67,6 +68,7 @@ public partial class App : Application
 
         // Startup window is created by hand (no StartupUri) so that a broken resource
         // dictionary or a missing file shows a readable message instead of a silent crash.
+        OliLog.Info("APP", "Первая настройка пропущена или завершена — открываю главное окно");
         try
         {
             var window = new MainWindow();
@@ -85,7 +87,96 @@ public partial class App : Application
             return;
         }
 
+        _startedOk = true;
+        OliLog.Info("APP", "Окно OLI открыто");
         base.OnStartup(e);
+    }
+
+    // ------------------------------------------------------------------ startup watchdog
+
+    private static bool _startedOk;
+    private static int _watchdogShown;
+
+    /// <summary>
+    /// Safety net for "OLI.exe запускается и ничего не происходит". WPF can end up with a
+    /// live process and no visible window (a deadlock, a modal dialog behind other windows,
+    /// a window created off-screen). Ten seconds after startup the app checks itself and,
+    /// if nothing is visible, says so in words — with the log path and an offer to open the
+    /// folder — instead of silently doing nothing.
+    /// </summary>
+    private static void ArmStartupWatchdog()
+    {
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            if (_startedOk) return;
+
+            var window = Current?.MainWindow;
+            if (window is { IsVisible: true }) return;
+            if (Interlocked.Exchange(ref _watchdogShown, 1) == 1) return;
+
+            OliLog.Error("APP", "Окно не открылось за 10 секунд — сработал сторож запуска.");
+            try { ShowStartupFailure(); } catch { /* nothing left to try */ }
+        };
+        timer.Start();
+    }
+
+    private static void ShowStartupFailure()
+    {
+        var logFile = Path.Combine(AppPaths.LogsRoot, "oli.log");
+        var answer = MessageBox.Show(
+            "OLI запустился, но окно не открылось.\n\n" +
+            "Так бывает, если окно ушло за край экрана (второй монитор отключён) " +
+            "или загрузка застряла.\n\n" +
+            $"Лог: {logFile}\n\n" +
+            "Нажмите «Да», чтобы открыть папку с логом, затем запустите OLI ещё раз. " +
+            "Если не помогло — пришлите последние строки лога.",
+            "OLI — окно не открылось",
+            MessageBoxButton.YesNo, MessageBoxImage.Warning);
+        if (answer == MessageBoxResult.Yes)
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{logFile}\"") { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                OliLog.Warning("APP", "Не удалось открыть папку лога: " + ex.Message);
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ startup probe
+
+    /// <summary>
+    /// Asks, before the wizard, whether an OLI already serves the port.
+    ///
+    /// This must never block the UI thread: WPF's SynchronizationContext is caught by the
+    /// <c>await</c> inside <see cref="PortGuard.OliAnswersAsync"/>, so calling it with
+    /// <c>.GetAwaiter().GetResult()</c> on startup deadlocked the app — the process stayed
+    /// alive with no window at all, which is exactly "OLI.exe не открывается".
+    /// The probe therefore runs on the thread pool, with a hard deadline, and any doubt is
+    /// answered with "не отвечает" — the wizard is the safe default, never a hang.
+    /// </summary>
+    private static bool IsOliServing(int port)
+    {
+        try
+        {
+            var probe = Task.Run(() => PortGuard.OliAnswersAsync(
+                port, CancellationToken.None, TimeSpan.FromMilliseconds(700)));
+            if (!probe.Wait(TimeSpan.FromSeconds(3)))
+            {
+                OliLog.Warning("APP", $"Проверка порта {port} не ответила за 3 с — продолжаю запуск.");
+                return false;
+            }
+            return probe.Result;
+        }
+        catch (Exception ex)
+        {
+            OliLog.Warning("APP", "Проверка порта: " + ex.Message);
+            return false;
+        }
     }
 
     // ------------------------------------------------------------------ single instance

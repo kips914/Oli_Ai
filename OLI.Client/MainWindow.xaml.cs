@@ -79,6 +79,9 @@ public partial class MainWindow : Window
 
         Loaded += async (_, _) =>
         {
+            // A window restored on a monitor that no longer exists is invisible: the process
+            // runs, the taskbar entry exists, and the user sees nothing. Pull it back.
+            EnsureOnScreen();
             await RefreshStatusAsync();
             _ = CheckForUpdatesOnStartupAsync();
             if (_settings.Telegram.Enabled && !string.IsNullOrWhiteSpace(_settings.Telegram.BotToken))
@@ -99,6 +102,37 @@ public partial class MainWindow : Window
             _web.Dispose();
             _updateService.Dispose();
         };
+    }
+
+    /// <summary>
+    /// Keeps the main window inside the visible desktop. WPF remembers size/position; after a
+    /// monitor is unplugged (or a laptop dock is removed) the saved position can be entirely
+    /// off-screen, which looks exactly like "OLI не открывается".
+    /// </summary>
+    private void EnsureOnScreen()
+    {
+        try
+        {
+            var area = SystemParameters.WorkArea;
+            var left = Left;
+            var top = Top;
+
+            if (double.IsNaN(left) || double.IsNaN(top) ||
+                left > area.Right - 80 || top > area.Bottom - 80 ||
+                left + Width < area.Left + 80 || top + Height < area.Top + 80)
+            {
+                WindowStartupLocation = WindowStartupLocation.Manual;
+                Left = area.Left + Math.Max(0, (area.Width - Width) / 2);
+                Top = area.Top + Math.Max(0, (area.Height - Height) / 2);
+                OliLog.Info("APP", "Окно возвращено на экран: сохранённая позиция была вне рабочего стола.");
+            }
+
+            if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        }
+        catch (Exception ex)
+        {
+            OliLog.Warning("APP", "Проверка положения окна: " + ex.Message);
+        }
     }
 
     // ================================================================ state
