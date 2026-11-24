@@ -110,6 +110,10 @@ public sealed class ServerHost : IAsyncDisposable
 
         await ResolvePortAsync(ct);
 
+        // A working OLI already owns the port. Binding it again is exactly the crash the user
+        // reported, so stop here: the caller talks to the existing server over HTTP.
+        if (_reuseExisting) return;
+
         var builder = WebApplication.CreateSlimBuilder();
         builder.Logging.ClearProviders();
         builder.Logging.AddSimpleConsole(o => o.SingleLine = true);
