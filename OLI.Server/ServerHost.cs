@@ -49,6 +49,14 @@ public sealed class ServerHost : IAsyncDisposable
     private readonly ChatStore _chats;
     private readonly LimitPolicy _limits;
     private LanBeacon? _beacon;
+    /// <summary>True when this instance did not bind: a working OLI already owns the port.</summary>
+    private bool _reuseExisting;
+
+    /// <summary>Human sentence about a moved/reused port (empty when nothing unusual happened).</summary>
+    public string PortNotice { get; private set; } = "";
+
+    /// <summary>Port actually in use after <see cref="ResolvePortAsync"/>.</summary>
+    public int ActivePort => _options.Port;
 
     public ServerHost(ServerOptions options)
     {
@@ -75,7 +83,8 @@ public sealed class ServerHost : IAsyncDisposable
         };
     }
 
-    public bool IsRunning => _app is not null;
+    /// <summary>Usable: either we bound the port, or a working OLI already answers on it.</summary>
+    public bool IsRunning => _app is not null || _reuseExisting;
     public string BaseUrl => _options.BaseUrl;
     public ServerOptions Options => _options;
     public int RegisteredUsers => _accounts.List().Count;
@@ -90,9 +99,16 @@ public sealed class ServerHost : IAsyncDisposable
 
     // ================================================================ lifecycle
 
+    /// <summary>
+    /// Starts Kestrel. A busy port is handled here, once, instead of being thrown at the UI
+    /// as a Kestrel stack trace: if OLI already answers on that port we reuse it, and if the
+    /// port belongs to something else we move to the next free one and say so.
+    /// </summary>
     public async Task StartAsync(CancellationToken ct = default)
     {
         if (_app is not null) return;
+
+        await ResolvePortAsync(ct);
 
         var builder = WebApplication.CreateSlimBuilder();
         builder.Logging.ClearProviders();
@@ -137,8 +153,69 @@ public sealed class ServerHost : IAsyncDisposable
         Report($"сервер запущен на {_options.BaseUrl} (пользователей: {RegisteredUsers})");
     }
 
+    /// <summary>
+    /// Decides which port this server may use. Three cases, all of them normal:
+    /// another OLI is already serving (a second window, or the first-run wizard) — reuse it
+    /// instead of fighting for the port; a foreign program holds the port — move to the next
+    /// free one; the port is free — use it.
+    /// </summary>
+    private async Task ResolvePortAsync(CancellationToken ct)
+    {
+        if (PortGuard.IsFree(_options.Port)) return;
+
+        if (await OliAnswersAsync(_options.Port, ct))
+        {
+            _reuseExisting = true;
+            PortNotice = $"Сервер OLI уже работает на порту {_options.Port} — использую его.";
+            Report(PortNotice);
+            return;
+        }
+
+        var owner = PortGuard.FindOwner(_options.Port);
+        var alternative = PortGuard.FindFree(_options.Port + 1);
+        if (alternative == 0)
+        {
+            throw new InvalidOperationException(
+                $"Порт {_options.Port} занят ({owner?.Describe ?? "неизвестно кем"}), " +
+                "и свободного порта рядом нет. Закройте программу, которая держит порт, " +
+                $"или смените порт в настройках. Команда для проверки: netstat -ano | findstr :{_options.Port}");
+        }
+
+        var message = owner is { ProcessId: > 0 }
+            ? $"{owner.Describe}. Сервер OLI переехал на порт {alternative}."
+            : $"Порт {_options.Port} занят другой программой. Сервер OLI переехал на порт {alternative}.";
+        PortNotice = message;
+        Report(message);
+        OliLog.Warning("SERVER", message);
+        _options.Port = alternative;
+    }
+
+    /// <summary>True when an OLI server (not some other app) answers on this port.</summary>
+    private static async Task<bool> OliAnswersAsync(int port, CancellationToken ct)
+    {
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+            using var response = await http.GetAsync($"http://127.0.0.1:{port}/api/health", ct);
+            if (!response.IsSuccessStatusCode) return false;
+            var body = await response.Content.ReadAsStringAsync(ct);
+            return body.Contains("\"service\":\"oli-server\"", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public async Task StopAsync()
     {
+        if (_reuseExisting)
+        {
+            // Another OLI owns that port; this instance never bound it.
+            _reuseExisting = false;
+            Report("сервер не останавливаю: порт обслуживает другой экземпляр OLI");
+            return;
+        }
         if (_app is null) return;
         try
         {

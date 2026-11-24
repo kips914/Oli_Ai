@@ -526,6 +526,29 @@ Check("latest thread is returned for 'current chat'",
     () => store.Latest("acc1") is not null);
 try { Directory.Delete(chatRoot, true); } catch { }
 
+// ------------------------------------------------------------ port guard
+// "address already in use" was the only thing the user saw about a busy port. These checks
+// pin the behaviour that replaces it: detect the holder, reuse a working OLI, or move.
+
+Console.WriteLine("PortGuard");
+var busyPort = FreePort();
+var holder = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Any, busyPort);
+holder.Start();
+try
+{
+    Check("a bound port is reported as busy", () => !PortGuard.IsFree(busyPort));
+    Check("an unbound port is reported as free", () => PortGuard.IsFree(busyPort + 1));
+    Check("the next free port is found automatically", () =>
+    {
+        var found = PortGuard.FindFree(busyPort + 1);
+        return found > busyPort && PortGuard.IsFree(found);
+    });
+    Check("moving never returns a busy port", () => PortGuard.FindFree(busyPort, 3) != busyPort);
+    Check("port 0 and out-of-range values are never 'free'", () => !PortGuard.IsFree(0) && !PortGuard.IsFree(70000));
+}
+finally { holder.Stop(); }
+Check("the busy port becomes usable again after release", () => PortGuard.IsFree(busyPort));
+
 // ------------------------------------------------------------ setup & components
 // First launch now installs what OLI needs and proves the connection works. These checks
 // pin the rules that decide "is the tunnel binary usable" and "what exactly is broken".
@@ -723,6 +746,64 @@ await using (var live = new OLI.Server.ServerHost(new OLI.Server.ServerOptions
     var afterDelete = await client.ListChatsAsync();
     Check("the deleted chat did not come back", () => afterDelete.All(t => t.Id != freshId));
 }
+
+// The exact reported failure: a second server on the same port. It must reuse the running
+// OLI instead of throwing "address already in use" at the UI.
+Console.WriteLine("Server on a busy port");
+var busyPort2 = FreePort();
+var busyRoot = Path.Combine(Path.GetTempPath(), "oli-busy-" + Guid.NewGuid().ToString("N"));
+await using (var firstServer = new OLI.Server.ServerHost(new OLI.Server.ServerOptions
+{
+    DataRoot = busyRoot,
+    Host = "127.0.0.1",
+    Port = busyPort2,
+    LlamaBaseUrl = "http://127.0.0.1:9",
+}))
+{
+    await firstServer.StartAsync();
+    Check("the first server binds its port", () => firstServer.IsRunning && firstServer.ActivePort == busyPort2);
+
+    await using var second = new OLI.Server.ServerHost(new OLI.Server.ServerOptions
+    {
+        DataRoot = Path.Combine(busyRoot, "second"),
+        Host = "127.0.0.1",
+        Port = busyPort2,
+        LlamaBaseUrl = "http://127.0.0.1:9",
+    });
+    var startedWithoutException = true;
+    try { await second.StartAsync(); }
+    catch { startedWithoutException = false; }
+
+    Check("a second server reuses a running OLI instead of crashing", () => startedWithoutException && second.IsRunning);
+    Check("reusing is explained in one sentence, not a stack trace",
+        () => second.PortNotice.Contains("уже работает", StringComparison.OrdinalIgnoreCase));
+    Check("stopping the reusing instance does not kill the working server", () =>
+    {
+        second.StopAsync().GetAwaiter().GetResult();
+        return firstServer.IsRunning;
+    });
+}
+
+// A foreign program on the port: the server must move, and say where.
+var foreign = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Any, 0);
+foreign.Start();
+var foreignPort = ((System.Net.IPEndPoint)foreign.LocalEndpoint).Port;
+try
+{
+    await using var moved = new OLI.Server.ServerHost(new OLI.Server.ServerOptions
+    {
+        DataRoot = Path.Combine(busyRoot, "moved"),
+        Host = "127.0.0.1",
+        Port = foreignPort,
+        LlamaBaseUrl = "http://127.0.0.1:9",
+    });
+    await moved.StartAsync();
+    Check("a port held by another program makes OLI move to a free one", () =>
+        moved.ActivePort != foreignPort && moved.ActivePort > 0 && moved.IsRunning);
+    Check("the move is reported to the user", () => moved.PortNotice.Contains("переехал") || moved.PortNotice.Contains("занят"));
+}
+finally { foreign.Stop(); }
+try { Directory.Delete(busyRoot, true); } catch { }
 
 try { Directory.Delete(liveRoot, true); } catch { }
 

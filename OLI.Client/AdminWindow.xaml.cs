@@ -19,8 +19,15 @@ public partial class AdminWindow : Window
     private readonly ServerHost _host;
     private readonly HttpClient _http;
     private readonly TunnelSettings _tunnelSettings;
-    private readonly TunnelManager _tunnel = new();
+    /// <summary>
+    /// Started lazily: if the first-run wizard already raised a tunnel, that instance is
+    /// adopted instead of spawning a second cloudflared on the same port.
+    /// </summary>
+    private TunnelManager? _tunnel;
     private List<AdminUser> _users = [];
+
+    /// <summary>Never null after construction; kept nullable only for the Closed handler.</summary>
+    private TunnelManager Tunnel => _tunnel ??= new TunnelManager();
 
     public AdminWindow(ServerHost host, TunnelSettings? tunnelSettings = null)
     {
@@ -28,6 +35,7 @@ public partial class AdminWindow : Window
         _host = host;
         _tunnelSettings = tunnelSettings ?? new TunnelSettings();
         _http = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{host.Options.Port}"), Timeout = TimeSpan.FromSeconds(15) };
+        _tunnel = App.TakeSetupTunnel() ?? new TunnelManager();
         _host.StatusChanged += OnServerStatusChanged;
         _tunnel.Changed += OnTunnelChanged;
         Loaded += async (_, _) =>
@@ -40,8 +48,12 @@ public partial class AdminWindow : Window
         Closed += (_, _) =>
         {
             _host.StatusChanged -= OnServerStatusChanged;
+            if (_tunnel is null) return;
             _tunnel.Changed -= OnTunnelChanged;
+            // Hand the tunnel back if it came from the wizard: the main window still may
+            // want it, and killing cloudflared here would silently drop internet access.
             _tunnel.Dispose();
+            _tunnel = null;
         };
     }
 
@@ -128,18 +140,18 @@ public partial class AdminWindow : Window
         if (!FirewallHelper.RuleExists(_host.Options.Port))
             TunnelLogText.Text = "Порт закрыт брандмауэром — туннель всё равно сработает, но по Wi-Fi телефон не подключится.";
 
-        var ok = await _tunnel.StartAsync(_tunnelSettings, _host.Options.Port);
+        var ok = await Tunnel.StartAsync(_tunnelSettings, _host.Options.Port);
         RefreshTunnelState();
-        TunnelStartButton.IsEnabled = !_tunnel.IsRunning;
+        TunnelStartButton.IsEnabled = !Tunnel.IsRunning;
         if (ok)
         {
             _tunnelSettings.Enabled = true;
-            _tunnelSettings.LastPublicUrl = _tunnel.PublicUrl;
+            _tunnelSettings.LastPublicUrl = Tunnel.PublicUrl;
             AdminMessageText.Text = "Телефону нужен только код подключения ниже — адрес вводить не нужно.";
         }
         else
         {
-            AdminMessageText.Text = "⚠ " + (_tunnel.LastError.Length > 0 ? _tunnel.LastError : "Туннель не запустился.");
+            AdminMessageText.Text = "⚠ " + (Tunnel.LastError.Length > 0 ? Tunnel.LastError : "Туннель не запустился.");
             TunnelLogText.Visibility = Visibility.Visible;
         }
     }
@@ -153,14 +165,14 @@ public partial class AdminWindow : Window
     private void RefreshTunnelState()
     {
         if (TunnelDot is null) return;
-        var running = _tunnel.IsRunning && _tunnel.PublicUrl.Length > 0;
+        var running = Tunnel.IsRunning && Tunnel.PublicUrl.Length > 0;
         TunnelDot.Fill = (System.Windows.Media.Brush)Application.Current.Resources[running ? "OnlineBrush" : "OfflineBrush"];
         TunnelStatusText.Text = running ? "Интернет-доступ: работает" : "Интернет-доступ: выключен";
         TunnelAddressText.Text = running
-            ? _tunnel.PublicUrl + "  ·  этот адрес меняется при каждом запуске, поэтому используйте код подключения"
-            : _tunnel.StatusLine;
+            ? Tunnel.PublicUrl + "  ·  этот адрес меняется при каждом запуске, поэтому используйте код подключения"
+            : Tunnel.StatusLine;
 
-        var url = running ? _tunnel.PublicUrl : _tunnelSettings.LastPublicUrl;
+        var url = running ? Tunnel.PublicUrl : _tunnelSettings.LastPublicUrl;
         var pairing = new List<string>();
         if (!string.IsNullOrWhiteSpace(url))
         {
@@ -188,12 +200,12 @@ public partial class AdminWindow : Window
 
         if (TunnelLogText.Visibility == Visibility.Visible && !_phoneReportShown)
         {
-            var lines = _tunnel.Log.TakeLast(3).ToList();
+            var lines = Tunnel.Log.TakeLast(3).ToList();
             TunnelLogText.Text = lines.Count == 0 ? "Журнал пуст." : string.Join(Environment.NewLine, lines);
         }
 
-        TunnelStopButton.IsEnabled = _tunnel.IsRunning;
-        TunnelStartButton.IsEnabled = !_tunnel.IsRunning;
+        TunnelStopButton.IsEnabled = Tunnel.IsRunning;
+        TunnelStartButton.IsEnabled = !Tunnel.IsRunning;
     }
 
     /// <summary>Set while the phone-path report occupies the log area.</summary>
@@ -210,7 +222,7 @@ public partial class AdminWindow : Window
 
     private async void TunnelStop_Click(object sender, RoutedEventArgs e)
     {
-        await _tunnel.StopAsync();
+        await Tunnel.StopAsync();
         _tunnelSettings.Enabled = false;
         TunnelPairText.Text = "";
         RefreshTunnelState();
@@ -230,7 +242,7 @@ public partial class AdminWindow : Window
 
     private void TunnelCopy_Click(object sender, RoutedEventArgs e)
     {
-        var url = _tunnel.IsRunning ? _tunnel.PublicUrl : _tunnelSettings.LastPublicUrl;
+        var url = Tunnel.IsRunning ? Tunnel.PublicUrl : _tunnelSettings.LastPublicUrl;
         if (string.IsNullOrWhiteSpace(url))
         {
             AdminMessageText.Text = "Сначала включите интернет-доступ.";
@@ -262,7 +274,7 @@ public partial class AdminWindow : Window
                 if (!_host.IsRunning) await _host.StartAsync();
             },
             async port => await Task.Run(() => FirewallHelper.EnsurePortOpen(port) is null),
-            async () => _tunnel.IsRunning ? _tunnel.PublicUrl : null)
+            async () => Tunnel.IsRunning ? Tunnel.PublicUrl : null)
         {
             Owner = this,
         };
@@ -313,10 +325,10 @@ public partial class AdminWindow : Window
             lines.Add($"4. Движок модели: {(login.State == OLI.Core.ConnectionState.Ready ? "работает" : "не отвечает")}" +
                       (login.Engine.Length > 0 ? $" ({login.Engine})" : ""));
 
-            if (_tunnel.IsRunning && !string.IsNullOrWhiteSpace(_tunnel.PublicUrl))
+            if (Tunnel.IsRunning && !string.IsNullOrWhiteSpace(Tunnel.PublicUrl))
             {
-                var publicProbe = await client.ProbeAsync(_tunnel.PublicUrl);
-                lines.Add($"5. Интернет: {_tunnel.PublicUrl} → {publicProbe.Message}");
+                var publicProbe = await client.ProbeAsync(Tunnel.PublicUrl);
+                lines.Add($"5. Интернет: {Tunnel.PublicUrl} → {publicProbe.Message}");
             }
             else
             {

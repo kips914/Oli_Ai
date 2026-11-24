@@ -23,6 +23,7 @@ public partial class SetupWindow : Window
     private readonly ComponentInstaller _installer = new();
 
     private SetupCheck? _lastCheck;
+    private bool _portReleased;
     private string _publicUrl = "";
     private bool _running;
 
@@ -260,7 +261,19 @@ public partial class SetupWindow : Window
         }
     }
 
-    private void Done_Click(object sender, RoutedEventArgs e)
+    protected override void OnClosed(EventArgs e)
+    {
+        // Whatever way the window closes, the temporary server must let go of the port —
+        // otherwise the chat window can never start its own server ("address already in use").
+        if (!_portReleased)
+        {
+            App.EndSetup();
+            _portReleased = true;
+        }
+        base.OnClosed(e);
+    }
+
+    private async void Done_Click(object sender, RoutedEventArgs e)
     {
         _settings.SetupCompleted = true;
         _settings.SetupVersion = AppVersion.Current;
@@ -268,7 +281,8 @@ public partial class SetupWindow : Window
 
         // Free port 6767 before the chat window starts its own server: two servers on one
         // port is the classic "сервер не запустился" after a successful setup.
-        App.EndSetup();
+        await App.EndSetupAsync();
+        _portReleased = true;
 
         DialogResult = Succeeded;
         Close();

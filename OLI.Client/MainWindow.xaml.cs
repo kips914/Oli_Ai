@@ -802,14 +802,37 @@ public partial class MainWindow : Window
     }
     private void ServerStop_Click(object sender, RoutedEventArgs e) => _ = StopServerAsync();
 
+    /// <summary>True while a start attempt is running: no second attempt, ever.</summary>
+    private bool _serverStarting;
+
     private async Task StartServerAsync(bool silent)
     {
+        // The log used to show the same "address already in use" five times in a row because
+        // the startup path and the button could both call this method.
+        if (_serverStarting) return;
+        if (_serverHost?.IsRunning == true)
+        {
+            RefreshServerUi();
+            return;
+        }
+
+        _serverStarting = true;
         try
         {
             _settings.Server.Enabled = true;
             PersistSettings();
             _serverHost ??= CreateServerHost();
             await _serverHost.StartAsync();
+
+            // The port may have moved (another OLI already serves, or a foreign program holds
+            // it): keep settings and the UI on the port that is actually in use.
+            if (_serverHost.ActivePort != _settings.Server.Port)
+            {
+                OliLog.Warning("SERVER", $"Порт {_settings.Server.Port} недоступен — работаю на {_serverHost.ActivePort}.");
+                _settings.Server.Port = _serverHost.ActivePort;
+                SettingsStore.Save(_settings);
+            }
+            if (_serverHost.PortNotice.Length > 0) ServerStatusLine.Text = _serverHost.PortNotice;
 
             // The beacon belongs to the server process (it starts and stops with ServerHost),
             // so the desktop app does not broadcast a second, competing packet.
@@ -830,16 +853,38 @@ public partial class MainWindow : Window
 
             RefreshServerUi();
             var address = NetworkInfo.PreferredAddress();
-            ServerStatusLine.Text += address is null
+            // The status line already carries the port notice, so append instead of replacing.
+            var suffix = address is null
                 ? " · адрес для телефона не найден (нет Wi-Fi/Ethernet)"
                 : $" · телефону указывать http://{address}:{port}";
+            if (!ServerStatusLine.Text.EndsWith(suffix, StringComparison.Ordinal))
+                ServerStatusLine.Text += suffix;
         }
         catch (Exception ex)
         {
-            OliLog.Error("SERVER", ex.ToString());
-            ServerStatusLine.Text = "⚠ " + ex.Message;
-            if (!silent) MessageBox.Show(this, ex.Message, "Сервер OLI", MessageBoxButton.OK, MessageBoxImage.Warning);
+            // A busy port is not a crash: explain it in one line instead of a stack trace.
+            var friendly = DescribeStartFailure(ex);
+            OliLog.Error("SERVER", friendly + Environment.NewLine + ex);
+            ServerStatusLine.Text = "⚠ " + friendly;
+            if (!silent) MessageBox.Show(this, friendly, "Сервер OLI", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
+        finally
+        {
+            _serverStarting = false;
+        }
+    }
+
+    /// <summary>Turns a port bind failure into one actionable sentence.</summary>
+    private string DescribeStartFailure(Exception ex)
+    {
+        if (ex is not IOException && !ex.ToString().Contains("address already in use", StringComparison.OrdinalIgnoreCase))
+            return ex.Message;
+
+        var port = _settings.Server.Port;
+        var owner = PortGuard.FindOwner(port);
+        var who = owner is { ProcessId: > 0 } ? owner.Describe : $"порт {port} занят";
+        return $"{who}. Закройте лишний OLI (диспетчер задач) или смените порт в настройках — " +
+               "сервер поднимется сам на свободном порту при следующем запуске.";
     }
 
     private async Task StopServerAsync()
