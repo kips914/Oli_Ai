@@ -1,0 +1,114 @@
+name: Build OLI.exe (win-x64)
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+    branches: [main, 'arena/**']
+    paths-ignore:
+      - '**/*.md'
+      - '.github/workflows/build-apk.yml'
+  pull_request:
+    paths-ignore:
+      - '**/*.md'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Publish self-contained OLI.exe
+    runs-on: windows-latest
+
+    env:
+      DOTNET_NOLOGO: 'true'
+      DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+      DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 'true'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore OLI.sln
+
+      - name: Build (net8.0 libraries)
+        run: dotnet build OLI.Core/OLI.Core.csproj -c Release --no-restore
+
+      - name: Build (agent, web, workspace, telegram)
+        run: |
+          dotnet build OLI.Workspace/OLI.Workspace.csproj -c Release --no-restore
+          dotnet build OLI.Agent/OLI.Agent.csproj     -c Release --no-restore
+          dotnet build OLI.Telegram/OLI.Telegram.csproj -c Release --no-restore
+          dotnet build OLI.MobileGateway/OLI.MobileGateway.csproj -c Release --no-restore
+          dotnet build OLI.Server/OLI.Server.csproj -c Release --no-restore
+
+      - name: Self-test (sandbox, zip, tools, search policy)
+        run: dotnet run --project OLI.SelfTest/OLI.SelfTest.csproj -c Release
+
+      - name: Publish OLI.exe
+        run: >
+          dotnet publish OLI.Client/OLI.Client.csproj
+          -c Release -r win-x64 --self-contained true -p:Platform=x64
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          -p:DebugType=none -p:DebugSymbols=false
+          -o dist
+
+      - name: Publish OLI.Server.exe
+        run: >
+          dotnet publish OLI.Server/OLI.Server.csproj
+          -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          -p:DebugType=none -p:DebugSymbols=false
+          -o dist/server
+
+      - name: Verify executable
+        shell: pwsh
+        run: |
+          if (!(Test-Path dist/OLI.exe)) { throw 'dist/OLI.exe was not produced' }
+          $size = [math]::Round((Get-Item dist/OLI.exe).Length / 1MB, 1)
+          Write-Host "OLI.exe built successfully ($size MB)"
+          Get-ChildItem dist | Select-Object Name, Length
+
+      - name: Package release bundle
+        shell: pwsh
+        run: |
+          Copy-Item OLI.ico, Install-OLI.ps1, README.md dist/ -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force dist/scripts | Out-Null
+          Copy-Item scripts/* dist/scripts/ -Recurse -Force
+          New-Item -ItemType Directory -Force dist/relay | Out-Null
+          Copy-Item relay/* dist/relay/ -Recurse -Force -ErrorAction SilentlyContinue
+          Copy-Item dist/server/OLI.Server.exe dist/OLI.Server.exe -Force
+          Compress-Archive -Path 'dist/OLI.exe','dist/OLI.Server.exe','dist/OLI.ico','dist/Install-OLI.ps1','dist/scripts','dist/relay','dist/README.md' `
+            -DestinationPath 'dist/OLI-win-x64.zip' -Force
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: OLI-win-x64
+          path: |
+            dist/OLI.exe
+            dist/OLI.Server.exe
+            dist/OLI-win-x64.zip
+          retention-days: 30
+
+      - name: Attach to release (tagged builds only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view ${{ github.ref_name }} 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create ${{ github.ref_name }} --title "OLI ${{ github.ref_name }}" --notes "Automated build ${{ github.ref_name }}"
+          }
+          gh release upload ${{ github.ref_name }} dist/OLI.exe dist/OLI.Server.exe dist/OLI-win-x64.zip --clobber

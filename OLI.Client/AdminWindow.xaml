@@ -1,0 +1,136 @@
+<Window x:Class="OLI.Client.AdminWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="OLI — пульт администратора" Width="1040" Height="820" MinWidth="780" MinHeight="600"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource BgWindowBrush}" Foreground="{StaticResource TextPrimaryBrush}"
+        FontFamily="Segoe UI" UseLayoutRounding="True">
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Margin="0,0,0,14">
+            <TextBlock Text="🛰 Пульт администратора" FontSize="23" FontWeight="Bold"/>
+            <TextBlock x:Name="AdminSubtitle" FontSize="12" Foreground="{StaticResource TextMutedBrush}"
+                       Margin="0,4,0,0"
+                       Text="Сервер OLI на этом ПК: пользователи, квоты, доступ. Пароли хранятся только в виде PBKDF2-хеша."/>
+        </StackPanel>
+
+        <!-- Server card -->
+        <Border Grid.Row="1" Style="{StaticResource Card}" Padding="16" Margin="0,0,0,14">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal">
+                        <Ellipse x:Name="ServerDot" Width="10" Height="10" Margin="0,0,8,0"
+                                 Fill="{StaticResource TextMutedBrush}" VerticalAlignment="Center"/>
+                        <TextBlock x:Name="ServerStatusText" Text="Сервер: остановлен" FontWeight="SemiBold"
+                                   FontSize="14"/>
+                    </StackPanel>
+                    <TextBlock x:Name="ServerDetailsText" Style="{StaticResource Caption}" Margin="18,6,0,0"
+                               Text="Запустите сервер, чтобы телефон мог подключиться."/>
+                    <TextBlock x:Name="ServerAddressText" Style="{StaticResource Caption}" Margin="18,4,0,0"
+                               FontFamily="Cascadia Mono, Consolas" Text=""/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="StartServerButton" Content="▶ Запустить сервер" Click="StartServer_Click"
+                            Style="{StaticResource AccentButton}" Height="34" Margin="0,0,8,0"/>
+                    <Button x:Name="StopServerButton" Content="■ Остановить" Click="StopServer_Click"
+                            Style="{StaticResource GhostButton}" Margin="0,0,8,0"/>
+                    <Button x:Name="RefreshUsersButton" Content="⟳" Click="Refresh_Click"
+                            Style="{StaticResource IconButton}" ToolTip="Обновить список"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Internet access (tunnel) -->
+        <Border Grid.Row="2" Style="{StaticResource Card}" Padding="16" Margin="0,0,0,14">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal">
+                        <Ellipse x:Name="TunnelDot" Width="10" Height="10" Margin="0,0,8,0"
+                                 Fill="{StaticResource TextMutedBrush}" VerticalAlignment="Center"/>
+                        <TextBlock x:Name="TunnelStatusText" Text="Интернет-доступ: выключен" FontWeight="SemiBold" FontSize="14"/>
+                    </StackPanel>
+                    <TextBlock x:Name="TunnelAddressText" Style="{StaticResource Caption}" Margin="18,6,0,0"
+                               FontFamily="Cascadia Mono, Consolas"
+                               Text="Нужен, когда телефон не в домашнем Wi-Fi (мобильный интернет, учёба, кафе)."/>
+                    <TextBlock x:Name="TunnelPairText" Margin="18,6,0,0" FontFamily="Cascadia Mono, Consolas"
+                               FontSize="11.5" Foreground="{StaticResource TextMutedBrush}" TextWrapping="Wrap" Text=""/>
+                    <TextBlock x:Name="TunnelLogText" Margin="18,8,0,0" FontSize="11" MaxHeight="76"
+                               TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
+                               Foreground="{StaticResource TextMutedBrush}" Visibility="Collapsed"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="TunnelStartButton" Content="🌍 Дам доступ из интернета" Click="TunnelStart_Click"
+                            Style="{StaticResource AccentButton}" Height="34" Margin="0,0,8,0"
+                            ToolTip="Запустит cloudflared рядом с OLI и выдаст публичный https-адрес"/>
+                    <Button x:Name="TunnelStopButton" Content="■ Выключить" Click="TunnelStop_Click"
+                            Style="{StaticResource GhostButton}" Margin="0,0,8,0"/>
+                    <Button x:Name="TunnelCopyButton" Content="⧉ Копировать код" Click="TunnelCopy_Click"
+                            Style="{StaticResource GhostButton}" Margin="0,0,8,0"/>
+                    <Button x:Name="TunnelLogButton" Content="Журнал" Click="TunnelLog_Click"
+                            Style="{StaticResource GhostButton}" Margin="0,0,8,0"/>
+                    <Button x:Name="PhoneTestButton" Content="📱 Проверить путь телефона" Click="PhoneTest_Click"
+                            Style="{StaticResource AccentButton}" ToolTip="Проверит сервер так же, как это делает приложение на телефоне"
+                            Margin="0,0,8,0"/>
+                    <Button x:Name="SetupButton" Content="🧰 Установка и проверка" Click="Setup_Click"
+                            Style="{StaticResource GhostButton}"
+                            ToolTip="Скачает недостающие компоненты (cloudflared) и пройдёт мини-тест подключения"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Users -->
+        <Border Grid.Row="3" Style="{StaticResource Card}" Padding="14">
+            <Grid>
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                <TextBlock Text="Пользователи" Style="{StaticResource SectionTitle}"/>
+                <DataGrid x:Name="UsersGrid" Grid.Row="1" AutoGenerateColumns="False" IsReadOnly="True"
+                          HeadersVisibility="Column" GridLinesVisibility="Horizontal"
+                          Background="Transparent" BorderThickness="0" RowBackground="Transparent"
+                          AlternatingRowBackground="{StaticResource BgInputBrush}"
+                          Foreground="{StaticResource TextPrimaryBrush}" FontSize="12.5"
+                          HorizontalGridLinesBrush="{StaticResource BorderBrush2}"
+                          SelectionMode="Single" CanUserAddRows="False">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Пользователь" Binding="{Binding UserName}" Width="*"/>
+                        <DataGridTextColumn Header="Создан" Binding="{Binding CreatedText}" Width="130"/>
+                        <DataGridTextColumn Header="Был(а)" Binding="{Binding LastLoginText}" Width="130"/>
+                        <DataGridTextColumn Header="Занято" Binding="{Binding UsageText}" Width="150"/>
+                        <DataGridTextColumn Header="Квота" Binding="{Binding QuotaText}" Width="90"/>
+                        <DataGridTextColumn Header="Статус" Binding="{Binding StatusText}" Width="90"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </Grid>
+        </Border>
+
+        <!-- Actions -->
+        <StackPanel Grid.Row="4" Orientation="Horizontal" Margin="0,14,0,0">
+            <Button x:Name="SetQuotaButton" Content="Изменить квоту" Click="SetQuota_Click"
+                    Style="{StaticResource GhostButton}" Margin="0,0,8,0"/>
+            <Button x:Name="ToggleUserButton" Content="Блок/разблок" Click="ToggleUser_Click"
+                    Style="{StaticResource GhostButton}" Margin="0,0,8,0"/>
+            <Button x:Name="ResetPasswordButton" Content="Сбросить пароль" Click="ResetPassword_Click"
+                    Style="{StaticResource GhostButton}" Margin="0,0,8,0"/>
+            <Button x:Name="DeleteUserButton" Content="Удалить" Click="DeleteUser_Click"
+                    Style="{StaticResource GhostButton}" Margin="0,0,8,0"/>
+            <Button x:Name="OpenStorageButton" Content="📂 Папки пользователей" Click="OpenStorage_Click"
+                    Style="{StaticResource GhostButton}"/>
+            <TextBlock x:Name="AdminMessageText" VerticalAlignment="Center" Margin="16,0,0,0"
+                       Foreground="{StaticResource TextMutedBrush}" FontSize="12"/>
+        </StackPanel>
+    </Grid>
+</Window>

@@ -1,0 +1,11 @@
+bin/
+obj/
+.vs/
+dist/
+models/
+OLI.bat
+OLI.cmd
+third_party/
+data/memory/*.json
+*.user
+*.suo

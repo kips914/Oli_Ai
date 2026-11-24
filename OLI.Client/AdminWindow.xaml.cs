@@ -1,0 +1,507 @@
+using System.Diagnostics;
+using System.Net.Http;
+using System.Net.Http.Json;
+using System.Text.Json;
+using System.Windows;
+using OLI.Core;
+using OLI.Server;
+using Localization = OLI.Core.Localization;
+
+namespace OLI.Client;
+
+/// <summary>
+/// The admin remote: starts/stops the local OLI server and manages accounts
+/// (quota, blocking, password reset). It talks to the server over loopback HTTP,
+/// so the same window could later administer a remote server by changing the URL.
+/// </summary>
+public partial class AdminWindow : Window
+{
+    private readonly ServerHost _host;
+    private readonly HttpClient _http;
+    private readonly TunnelSettings _tunnelSettings;
+    /// <summary>
+    /// Started lazily: if the first-run wizard already raised a tunnel, that instance is
+    /// adopted instead of spawning a second cloudflared on the same port.
+    /// </summary>
+    private TunnelManager? _tunnel;
+    private List<AdminUser> _users = [];
+
+    /// <summary>Never null after construction; kept nullable only for the Closed handler.</summary>
+    private TunnelManager Tunnel => _tunnel ??= new TunnelManager();
+
+    public AdminWindow(ServerHost host, TunnelSettings? tunnelSettings = null)
+    {
+        InitializeComponent();
+        _host = host;
+        _tunnelSettings = tunnelSettings ?? new TunnelSettings();
+        _http = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{host.Options.Port}"), Timeout = TimeSpan.FromSeconds(15) };
+        _tunnel = App.TakeSetupTunnel() ?? new TunnelManager();
+        _host.StatusChanged += OnServerStatusChanged;
+        _tunnel.Changed += OnTunnelChanged;
+        Loaded += async (_, _) =>
+        {
+            RefreshServerState();
+            RefreshTunnelState();
+            await LoadUsersAsync();
+            if (_tunnelSettings.Enabled && _host.IsRunning) await StartTunnelAsync();
+        };
+        Closed += (_, _) =>
+        {
+            _host.StatusChanged -= OnServerStatusChanged;
+            if (_tunnel is null) return;
+            _tunnel.Changed -= OnTunnelChanged;
+            // Hand the tunnel back if it came from the wizard: the main window still may
+            // want it, and killing cloudflared here would silently drop internet access.
+            _tunnel.Dispose();
+            _tunnel = null;
+        };
+    }
+
+    private void OnServerStatusChanged(string status) => Dispatcher.Invoke(() =>
+    {
+        ServerDetailsText.Text = status;
+        RefreshServerState();
+        _ = LoadUsersAsync();
+    });
+
+    private void RefreshServerState()
+    {
+        var running = _host.IsRunning;
+        ServerDot.Fill = (System.Windows.Media.Brush)Application.Current.Resources[running ? "OnlineBrush" : "OfflineBrush"];
+        ServerStatusText.Text = running ? "Сервер: работает" : "Сервер: остановлен";
+        StartServerButton.IsEnabled = !running;
+        StopServerButton.IsEnabled = running;
+
+        var port = _host.Options.Port;
+        var portOpen = FirewallHelper.RuleExists(port);
+        var all = OLI.Core.NetworkAddresses.LocalDetailed()
+            .Where(a => a.IsWifiOrEthernet)
+            .Select(a => a.Address)
+            .Where(a => !string.IsNullOrWhiteSpace(a))
+            .Distinct()
+            .ToList();
+        var addresses = all.Count > 0 ? string.Join("  ·  ", all.Select(a => $"http://{a}:{port}")) : "—";
+
+        ServerAddressText.Text = running
+            ? $"Порт {port} · адрес для телефона по Wi-Fi: {addresses}" +
+              (portOpen
+                  ? "  · брандмауэр: порт открыт"
+                  : $"  · ⚠ брандмауэр: порт {port} ЗАКРЫТ — телефон по Wi-Fi не увидит сервер, нажмите «🛡 Открыть порт»")
+            : $"Порт {port}. Адрес для телефона появится после запуска сервера.";
+
+        if (running && string.IsNullOrWhiteSpace(ServerDetailsText.Text))
+            ServerDetailsText.Text = $"API: {_host.BaseUrl} · пользователей: {_host.RegisteredUsers}";
+    }
+
+    // ------------------------------------------------------------- server
+
+    private async void StartServer_Click(object sender, RoutedEventArgs e)
+    {
+        StartServerButton.IsEnabled = false;
+        AdminMessageText.Text = "Запускаю сервер...";
+        try
+        {
+            await _host.StartAsync();
+            AdminMessageText.Text = "Сервер запущен.";
+        }
+        catch (Exception ex)
+        {
+            OliLog.Error("SERVER", ex.ToString());
+            AdminMessageText.Text = "⚠ " + ex.Message;
+        }
+        finally
+        {
+            RefreshServerState();
+            await LoadUsersAsync();
+        }
+    }
+
+    private async void StopServer_Click(object sender, RoutedEventArgs e)
+    {
+        AdminMessageText.Text = "Останавливаю сервер...";
+        await _host.StopAsync();
+        AdminMessageText.Text = "Сервер остановлен.";
+        RefreshServerState();
+    }
+
+    private async void Refresh_Click(object sender, RoutedEventArgs e) => await LoadUsersAsync();
+
+    // ------------------------------------------------------------- tunnel
+
+    private async Task StartTunnelAsync()
+    {
+        if (!_host.IsRunning)
+        {
+            TunnelStatusText.Text = "Интернет-доступ: сначала запустите сервер.";
+            return;
+        }
+
+        TunnelStartButton.IsEnabled = false;
+        if (!FirewallHelper.RuleExists(_host.Options.Port))
+            TunnelLogText.Text = "Порт закрыт брандмауэром — туннель всё равно сработает, но по Wi-Fi телефон не подключится.";
+
+        var ok = await Tunnel.StartAsync(_tunnelSettings, _host.Options.Port);
+        RefreshTunnelState();
+        TunnelStartButton.IsEnabled = !Tunnel.IsRunning;
+        if (ok)
+        {
+            _tunnelSettings.Enabled = true;
+            _tunnelSettings.LastPublicUrl = Tunnel.PublicUrl;
+            AdminMessageText.Text = "Телефону нужен только код подключения ниже — адрес вводить не нужно.";
+        }
+        else
+        {
+            AdminMessageText.Text = "⚠ " + (Tunnel.LastError.Length > 0 ? Tunnel.LastError : "Туннель не запустился.");
+            TunnelLogText.Visibility = Visibility.Visible;
+        }
+    }
+
+    private void OnTunnelChanged()
+    {
+        _phoneReportShown = false;
+        Dispatcher.Invoke(RefreshTunnelState);
+    }
+
+    private void RefreshTunnelState()
+    {
+        if (TunnelDot is null) return;
+        var running = Tunnel.IsRunning && Tunnel.PublicUrl.Length > 0;
+        TunnelDot.Fill = (System.Windows.Media.Brush)Application.Current.Resources[running ? "OnlineBrush" : "OfflineBrush"];
+        TunnelStatusText.Text = running ? "Интернет-доступ: работает" : "Интернет-доступ: выключен";
+        TunnelAddressText.Text = running
+            ? Tunnel.PublicUrl + "  ·  этот адрес меняется при каждом запуске, поэтому используйте код подключения"
+            : Tunnel.StatusLine;
+
+        var url = running ? Tunnel.PublicUrl : _tunnelSettings.LastPublicUrl;
+        var pairing = new List<string>();
+        if (!string.IsNullOrWhiteSpace(url))
+        {
+            pairing.Add("Код для телефона вне дома (" + (running ? "интернет-доступ работает" : "последний адрес") +
+                      "). В приложении: Настройки → «Вставить код»:");
+            pairing.Add(BuildPairCode(url));
+        }
+        else
+        {
+            pairing.Add("Код для телефона вне дома появится после «🌍 Дам доступ из интернета».");
+        }
+
+        // Home Wi-Fi needs no code, but a code is still the fastest way to pair.
+        if (_host.IsRunning)
+        {
+            var lan = OLI.Core.NetworkAddresses.LocalDetailed()
+                .FirstOrDefault(a => a.IsWifiOrEthernet && !OLI.Core.NetworkAddresses.IsVirtualAddress(a.Address));
+            if (lan is not null)
+            {
+                pairing.Add("");
+                pairing.Add($"Дома (один Wi-Fi) код не обязателен: http://{lan.Address}:{_host.Options.Port}");
+            }
+        }
+        TunnelPairText.Text = string.Join(Environment.NewLine, pairing);
+
+        if (TunnelLogText.Visibility == Visibility.Visible && !_phoneReportShown)
+        {
+            var lines = Tunnel.Log.TakeLast(3).ToList();
+            TunnelLogText.Text = lines.Count == 0 ? "Журнал пуст." : string.Join(Environment.NewLine, lines);
+        }
+
+        TunnelStopButton.IsEnabled = Tunnel.IsRunning;
+        TunnelStartButton.IsEnabled = !Tunnel.IsRunning;
+    }
+
+    /// <summary>Set while the phone-path report occupies the log area.</summary>
+    private bool _phoneReportShown;
+
+    private string BuildPairCode(string url) =>
+        TunnelManager.BuildPairCode(url, _host.Options.InviteCode);
+
+    private async void TunnelStart_Click(object sender, RoutedEventArgs e)
+    {
+        AdminMessageText.Text = "Запускаю туннель (первый запуск cloudflared может занять 10–20 секунд)…";
+        await StartTunnelAsync();
+    }
+
+    private async void TunnelStop_Click(object sender, RoutedEventArgs e)
+    {
+        await Tunnel.StopAsync();
+        _tunnelSettings.Enabled = false;
+        TunnelPairText.Text = "";
+        RefreshTunnelState();
+        AdminMessageText.Text = "Интернет-доступ выключен: телефон снова подключается только по Wi-Fi.";
+    }
+
+    private void TunnelLog_Click(object sender, RoutedEventArgs e)
+    {
+        // Closing the log must also drop the "phone test" report flag, otherwise the next
+        // real journal lines would never replace the report text.
+        _phoneReportShown = false;
+        var showing = TunnelLogText.Visibility != Visibility.Visible;
+        TunnelLogText.Visibility = showing ? Visibility.Visible : Visibility.Collapsed;
+        TunnelLogButton.Content = showing ? "Скрыть журнал" : "Журнал";
+        RefreshTunnelState();
+    }
+
+    private void TunnelCopy_Click(object sender, RoutedEventArgs e)
+    {
+        var url = Tunnel.IsRunning ? Tunnel.PublicUrl : _tunnelSettings.LastPublicUrl;
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            AdminMessageText.Text = "Сначала включите интернет-доступ.";
+            return;
+        }
+        var code = BuildPairCode(url);
+        try
+        {
+            Clipboard.SetText(code);
+            AdminMessageText.Text = "Код подключения скопирован. В приложении: Настройки → «Вставить код».";
+        }
+        catch (Exception ex)
+        {
+            AdminMessageText.Text = "⚠ " + ex.Message;
+        }
+    }
+
+    /// <summary>
+    /// Re-runs the first-launch wizard: components (cloudflared), firewall, tunnel and the
+    /// mini connectivity test. This is the "why doesn't my phone connect" button for the PC.
+    /// </summary>
+    private void Setup_Click(object sender, RoutedEventArgs e)
+    {
+        var settings = SettingsStore.Load();
+        var window = new SetupWindow(
+            settings,
+            async () =>
+            {
+                if (!_host.IsRunning) await _host.StartAsync();
+            },
+            async port => await Task.Run(() => FirewallHelper.EnsurePortOpen(port) is null),
+            async () => Tunnel.IsRunning ? Tunnel.PublicUrl : null)
+        {
+            Owner = this,
+        };
+        window.ShowDialog();
+        RefreshTunnelState();
+    }
+
+    // ------------------------------------------------------------- phone test
+
+    /// <summary>
+    /// Probes the server exactly like the phone does (health → auth → chat-ready) and
+    /// prints one line per step. This is the answer to "телефон не подключается":
+    /// the PC can now show whether the problem is the address, the firewall or the engine.
+    /// </summary>
+    private async void PhoneTest_Click(object sender, RoutedEventArgs e)
+    {
+        PhoneTestButton.IsEnabled = false;
+        AdminMessageText.Text = "Проверяю так же, как телефон…";
+        var lines = new List<string>();
+
+        try
+        {
+            var port = _host.Options.Port;
+            var local = OLI.Core.NetworkAddresses.LocalDetailed()
+                .Where(a => a.IsWifiOrEthernet)
+                .Select(a => a.Address)
+                .ToList();
+
+            lines.Add(_host.IsRunning ? $"1. Сервер: запущен на порту {port}" : $"1. Сервер: НЕ запущен (порт {port})");
+            lines.Add(OLI.Client.FirewallHelper.RuleExists(port)
+                ? $"2. Брандмауэр: порт {port} открыт"
+                : $"2. Брандмауэр: порт {port} ЗАКРЫТ — телефон по Wi-Fi не подключится");
+
+            // The real phone path: the LAN address, not 127.0.0.1.
+            using var client = new OLI.Engine.OliServerClient();
+            var candidates = local.Select(a => $"http://{a}:{port}").ToList();
+            if (candidates.Count == 0) lines.Add("3. Адреса Wi-Fi/Ethernet не найдены (нет сети)");
+
+            foreach (var candidate in candidates)
+            {
+                var probe = await client.ProbeAsync(candidate);
+                lines.Add($"3. {candidate} → {probe.Message}");
+            }
+
+            // No account: only the health part can be checked, which is exactly what
+            // makes the login screen show "сервер недоступен".
+            var login = await client.ProbeAsync($"http://127.0.0.1:{port}");
+            lines.Add($"4. Движок модели: {(login.State == OLI.Core.ConnectionState.Ready ? "работает" : "не отвечает")}" +
+                      (login.Engine.Length > 0 ? $" ({login.Engine})" : ""));
+
+            if (Tunnel.IsRunning && !string.IsNullOrWhiteSpace(Tunnel.PublicUrl))
+            {
+                var publicProbe = await client.ProbeAsync(Tunnel.PublicUrl);
+                lines.Add($"5. Интернет: {Tunnel.PublicUrl} → {publicProbe.Message}");
+            }
+            else
+            {
+                lines.Add("5. Интернет: доступ выключен (кнопка «🌍 Дам доступ из интернета»)");
+            }
+        }
+        catch (Exception ex)
+        {
+            lines.Add("⚠ " + ex.Message);
+        }
+        finally
+        {
+            PhoneTestButton.IsEnabled = true;
+            TunnelLogText.Visibility = Visibility.Visible;
+            TunnelLogButton.Content = "Скрыть журнал";
+            TunnelLogText.Text = string.Join(Environment.NewLine, lines);
+            _phoneReportShown = true;
+            AdminMessageText.Text = "Проверка пути телефона готова — подробности ниже.";
+        }
+    }
+
+    // ------------------------------------------------------------- users
+
+    private async Task LoadUsersAsync()
+    {
+        if (!_host.IsRunning)
+        {
+            _users = [];
+            UsersGrid.ItemsSource = _users;
+            return;
+        }
+
+        try
+        {
+            using var response = await _http.GetAsync("/api/admin/users");
+            if (!response.IsSuccessStatusCode)
+            {
+                AdminMessageText.Text = $"Не удалось получить список: HTTP {(int)response.StatusCode}";
+                return;
+            }
+
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            var list = new List<AdminUser>();
+            foreach (var user in doc.RootElement.GetProperty("users").EnumerateArray())
+            {
+                list.Add(new AdminUser
+                {
+                    Id = Str(user, "id"),
+                    UserName = Str(user, "userName"),
+                    CreatedText = Date(user, "createdAt"),
+                    LastLoginText = Date(user, "lastLoginAt"),
+                    UsedBytes = user.TryGetProperty("used", out var used) ? used.GetInt64() : 0,
+                    QuotaBytes = user.TryGetProperty("quota", out var quota) ? quota.GetInt64() : 0,
+                    Disabled = user.TryGetProperty("disabled", out var disabled) && disabled.GetBoolean(),
+                });
+            }
+
+            _users = list;
+            UsersGrid.ItemsSource = _users;
+            AdminMessageText.Text = $"Пользователей: {_users.Count}. Пароли хранятся как PBKDF2-хеш (только пользователь знает свой пароль).";
+        }
+        catch (Exception ex)
+        {
+            AdminMessageText.Text = "⚠ " + ex.Message;
+        }
+    }
+
+    private async void SetQuota_Click(object sender, RoutedEventArgs e)
+    {
+        var user = UsersGrid.SelectedItem as AdminUser;
+        if (user is null) { AdminMessageText.Text = "Выберите пользователя."; return; }
+
+        var dialog = new QuotaDialog(user.UserName, user.QuotaBytes) { Owner = this };
+        if (dialog.ShowDialog() != true) return;
+
+        var ok = await PostAsync("/api/admin/quota", new { accountId = user.Id, quotaBytes = dialog.QuotaBytes });
+        AdminMessageText.Text = ok ? $"Квота {user.UserName} = {Human(dialog.QuotaBytes)}." : "Не удалось изменить квоту.";
+        await LoadUsersAsync();
+    }
+
+    private async void ToggleUser_Click(object sender, RoutedEventArgs e)
+    {
+        var user = UsersGrid.SelectedItem as AdminUser;
+        if (user is null) { AdminMessageText.Text = "Выберите пользователя."; return; }
+
+        var disable = !user.Disabled;
+        if (disable && MessageBox.Show(this, $"Заблокировать {user.UserName}? Все его токены будут отозваны.",
+                "OLI", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+
+        var ok = await PostAsync("/api/admin/disable", new { accountId = user.Id, disabled = disable });
+        AdminMessageText.Text = ok
+            ? $"{(disable ? "Заблокирован" : "Разблокирован")}: {user.UserName}."
+            : "Не удалось изменить статус.";
+        await LoadUsersAsync();
+    }
+
+    private async void ResetPassword_Click(object sender, RoutedEventArgs e)
+    {
+        var user = UsersGrid.SelectedItem as AdminUser;
+        if (user is null) { AdminMessageText.Text = "Выберите пользователя."; return; }
+
+        var dialog = new PasswordResetDialog(user.UserName) { Owner = this };
+        if (dialog.ShowDialog() != true) return;
+
+        var ok = await PostAsync("/api/admin/reset-password", new { accountId = user.Id, newPassword = dialog.NewPassword });
+        AdminMessageText.Text = ok
+            ? $"Пароль {user.UserName} изменён. Старый пароль восстановить невозможно — в базе только хеш."
+            : "Не удалось сбросить пароль (проверьте требования к паролю).";
+        await LoadUsersAsync();
+    }
+
+    private async void DeleteUser_Click(object sender, RoutedEventArgs e)
+    {
+        var user = UsersGrid.SelectedItem as AdminUser;
+        if (user is null) { AdminMessageText.Text = "Выберите пользователя."; return; }
+
+        if (MessageBox.Show(this,
+                $"Удалить {user.UserName} и ВСЕ его файлы ({Human(user.UsedBytes)})? Это необратимо.",
+                "OLI", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+
+        var ok = await PostAsync("/api/admin/delete", new { accountId = user.Id, disabled = true });
+        AdminMessageText.Text = ok ? $"Удалён: {user.UserName}." : "Не удалось удалить пользователя.";
+        await LoadUsersAsync();
+    }
+
+    private void OpenStorage_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo("explorer.exe", $"\"{_host.Options.DataRoot}\"") { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            AdminMessageText.Text = "⚠ " + ex.Message;
+        }
+    }
+
+    private async Task<bool> PostAsync(string url, object payload)
+    {
+        try
+        {
+            using var response = await _http.PostAsJsonAsync(url, payload);
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            AdminMessageText.Text = "⚠ " + ex.Message;
+            return false;
+        }
+    }
+
+    private static string Str(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var value) ? value.GetString() ?? "" : "";
+
+    private static string Date(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String &&
+        value.TryGetDateTimeOffset(out var date)
+            ? date.ToLocalTime().ToString("yyyy-MM-dd HH:mm")
+            : "—";
+
+    private static string Human(long bytes) => OLI.Workspace.TextExtractors.FormatSize(bytes);
+
+    public sealed class AdminUser
+    {
+        public string Id { get; set; } = "";
+        public string UserName { get; set; } = "";
+        public string CreatedText { get; set; } = "";
+        public string LastLoginText { get; set; } = "";
+        public long UsedBytes { get; set; }
+        public long QuotaBytes { get; set; }
+        public bool Disabled { get; set; }
+        public string QuotaText => Human(QuotaBytes);
+        public string UsageText => $"{Human(UsedBytes)} / {Human(QuotaBytes)}";
+        public string StatusText => Disabled ? "заблокирован" : "активен";
+    }
+}

@@ -1,0 +1,502 @@
+<Window x:Class="OLI.Client.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="clr-namespace:OLI.Client"
+    Title="OLI" x:Name="MainWindowRoot" Height="820" Width="1180" MinHeight="560" MinWidth="760"
+    WindowStartupLocation="CenterScreen"
+    Background="{StaticResource BgWindowBrush}"
+    FontFamily="Segoe UI"
+    UseLayoutRounding="True"
+    TextOptions.TextFormattingMode="Display">
+
+    <Window.Resources>
+        <local:RoleToAlignmentConverter x:Key="RoleToAlignment"/>
+        <local:RoleToLabelConverter x:Key="RoleToLabel"/>
+        <local:RoleToBrushConverter x:Key="RoleToBrush"/>
+
+        <!-- Chat bubble -->
+        <DataTemplate x:Key="ChatBubbleTemplate">
+            <StackPanel Margin="0,0,0,16"
+                        HorizontalAlignment="{Binding Role, Converter={StaticResource RoleToAlignment}}">
+                <TextBlock x:Name="LabelText"
+                           Text="{Binding Role, Converter={StaticResource RoleToLabel}}"
+                           FontSize="10.5" FontWeight="SemiBold"
+                           Foreground="{StaticResource TextMutedBrush}"
+                           Margin="6,0,6,5"
+                           HorizontalAlignment="{Binding Role, Converter={StaticResource RoleToAlignment}}"/>
+                <Border x:Name="BubbleBorder" MaxWidth="700" CornerRadius="16" Padding="16,12"
+                        Background="{Binding Role, Converter={StaticResource RoleToBrush}}">
+                    <TextBlock x:Name="ContentText" Text="{Binding Content}" TextWrapping="Wrap" FontSize="14"
+                               Foreground="{StaticResource TextPrimaryBrush}" LineHeight="21"/>
+                </Border>
+            </StackPanel>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding Role}" Value="user">
+                    <Setter TargetName="ContentText" Property="Foreground" Value="White"/>
+                    <Setter TargetName="BubbleBorder" Property="CornerRadius" Value="16,16,5,16"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Role}" Value="assistant">
+                    <Setter TargetName="BubbleBorder" Property="BorderBrush" Value="{StaticResource BorderBrush2}"/>
+                    <Setter TargetName="BubbleBorder" Property="BorderThickness" Value="1"/>
+                    <Setter TargetName="BubbleBorder" Property="CornerRadius" Value="16,16,16,5"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Role}" Value="system">
+                    <Setter TargetName="LabelText" Property="Visibility" Value="Collapsed"/>
+                    <Setter TargetName="BubbleBorder" Property="BorderBrush" Value="{StaticResource BorderBrush2}"/>
+                    <Setter TargetName="BubbleBorder" Property="BorderThickness" Value="1"/>
+                    <Setter TargetName="BubbleBorder" Property="CornerRadius" Value="12"/>
+                    <Setter TargetName="BubbleBorder" Property="Padding" Value="12,6"/>
+                    <Setter TargetName="BubbleBorder" Property="MaxWidth" Value="560"/>
+                    <Setter TargetName="ContentText" Property="Foreground" Value="{StaticResource TextMutedBrush}"/>
+                    <Setter TargetName="ContentText" Property="FontSize" Value="12"/>
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- ======================= Sidebar ======================= -->
+        <Border Grid.Column="0" Width="268" Background="{StaticResource BgPanelBrush}"
+                BorderBrush="{StaticResource BorderBrush2}" BorderThickness="0,0,1,0">
+            <Grid Margin="16,18,16,14">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <!-- Logo -->
+                <StackPanel Orientation="Horizontal" Margin="2,0,0,20">
+                    <Border Width="40" Height="40" CornerRadius="12" Background="{StaticResource AccentGradient}"
+                            Margin="0,0,12,0">
+                        <TextBlock Text="O" FontWeight="Bold" FontSize="20" Foreground="White"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="OLI" FontSize="19" FontWeight="Bold"
+                                   Foreground="{StaticResource TextPrimaryBrush}"/>
+                        <TextBlock x:Name="VersionText" Text="v1.8" FontSize="11"
+                                   Foreground="{StaticResource TextMutedBrush}"/>
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- Status card -->
+                <Border Grid.Row="1" Style="{StaticResource Card}" Background="{StaticResource BgElevatedBrush}"
+                        Padding="12,10" Margin="0,0,0,16">
+                    <StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse x:Name="StatusDot" Width="9" Height="9" Margin="0,0,8,0"
+                                     Fill="{StaticResource TextMutedBrush}" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="StatusText" Text="OLI: запуск..." FontSize="12"
+                                       Foreground="{StaticResource TextPrimaryBrush}" VerticalAlignment="Center"
+                                       TextTrimming="CharacterEllipsis"/>
+                        </StackPanel>
+                        <TextBlock x:Name="ModelText" Text="Qwen3.5 4B" FontSize="11" Margin="17,4,0,0"
+                                   Foreground="{StaticResource TextMutedBrush}" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock x:Name="ModeText" Text="⚡ FAST" FontSize="11" Margin="17,2,0,0"
+                                   Foreground="{StaticResource TextMutedBrush}"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- Nav + workspace panel -->
+                <StackPanel Grid.Row="2">
+                    <TextBlock Text="РАЗДЕЛЫ" FontSize="10" FontWeight="SemiBold" Margin="4,0,0,8"
+                               Foreground="{StaticResource TextMutedBrush}"/>
+                    <StackPanel x:Name="NavPanel">
+                        <RadioButton x:Name="NavChat" Content="💬  Чат" GroupName="nav" IsChecked="True"
+                                     Checked="Nav_Checked" Style="{StaticResource NavRadio}"/>
+                        <RadioButton x:Name="NavWorkspace" Content="🗂  Workspace" GroupName="nav"
+                                     Checked="Nav_Checked" Style="{StaticResource NavRadio}"/>
+                        <RadioButton x:Name="NavWeb" Content="🌐  Поиск в интернете" GroupName="nav"
+                                     Checked="Nav_Checked" Style="{StaticResource NavRadio}"/>
+                        <RadioButton x:Name="NavTelegram" Content="✈️  Telegram-бот" GroupName="nav"
+                                     Checked="Nav_Checked" Style="{StaticResource NavRadio}"/>
+                        <RadioButton x:Name="NavConsole" Content="🖥  Консоль" GroupName="nav"
+                                     Checked="Nav_Checked" Style="{StaticResource NavRadio}"/>
+                        <RadioButton x:Name="NavAdmin" Content="🛰  Пульт админа" GroupName="nav"
+                                     Checked="Nav_Checked" Style="{StaticResource NavRadio}"/>
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- Bottom actions -->
+                <StackPanel Grid.Row="3">
+                    <Border Style="{StaticResource Divider}"/>
+                    <Button x:Name="SettingsButton" Content="⚙  Настройки" Click="OpenFullSettings_Click"
+                            Style="{StaticResource GhostButton}" HorizontalAlignment="Stretch" Margin="0,4,0,0"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- ======================= Main area ======================= -->
+        <Grid Grid.Column="1" Margin="22,18,22,18">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- Header -->
+            <Grid Grid.Row="0" Margin="0,0,0,16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock x:Name="PageTitle" Text="Чат с OLI" FontSize="21" FontWeight="Bold"
+                               Foreground="{StaticResource TextPrimaryBrush}"/>
+                    <TextBlock x:Name="PageSubtitle" Text="Локальный ИИ-помощник для любых задач" FontSize="12"
+                               Foreground="{StaticResource TextMutedBrush}" Margin="0,3,0,0"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="NewChatButton" Content="＋ Новый чат" Click="NewChat_Click"
+                            Style="{StaticResource GhostButton}" Margin="0,0,8,0"/>
+                    <Button x:Name="OpenWorkspaceFolderButton" Content="📂" Click="OpenWorkspaceFolder_Click"
+                            Style="{StaticResource IconButton}" ToolTip="Открыть папку workspace"/>
+                </StackPanel>
+            </Grid>
+
+            <!-- Content pages -->
+            <Grid Grid.Row="1">
+                <!-- CHAT -->
+                <Border x:Name="ChatPage" Style="{StaticResource Card}">
+                    <ScrollViewer x:Name="ChatScroll" Padding="20" VerticalScrollBarVisibility="Auto">
+                        <ItemsControl x:Name="ChatList" ItemTemplate="{StaticResource ChatBubbleTemplate}"/>
+                    </ScrollViewer>
+                </Border>
+
+                <!-- WORKSPACE -->
+                <Grid x:Name="WorkspacePage" Visibility="Collapsed">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Border Grid.Column="0" Style="{StaticResource Card}" Padding="14">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <Grid Grid.Row="0" Margin="0,0,0,10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock x:Name="WorkspacePathText" FontSize="12" VerticalAlignment="Center"
+                                           Foreground="{StaticResource TextMutedBrush}" TextTrimming="CharacterEllipsis"/>
+                                <Button Grid.Column="1" x:Name="WsRefreshButton" Content="⟳" Click="WsRefresh_Click"
+                                        Style="{StaticResource IconButton}" Width="30" Height="30" Margin="0,0,6,0"/>
+                                <Button Grid.Column="2" x:Name="WsUpButton" Content="⤴" Click="WsUp_Click"
+                                        Style="{StaticResource IconButton}" Width="30" Height="30" Margin="0,0,6,0"
+                                        ToolTip="На уровень выше"/>
+                                <Button Grid.Column="3" x:Name="WsZipButton" Content="🗜" Click="WsZip_Click"
+                                        Style="{StaticResource IconButton}" Width="30" Height="30"
+                                        ToolTip="Заархивировать выбранное"/>
+                            </Grid>
+                            <ListBox Grid.Row="1" x:Name="WorkspaceList" Background="Transparent" BorderThickness="0"
+                                     Foreground="{StaticResource TextPrimaryBrush}"
+                                     MouseDoubleClick="WorkspaceList_DoubleClick" FontSize="13"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                <ListBox.ItemContainerStyle>
+                                    <Style TargetType="ListBoxItem">
+                                        <Setter Property="Padding" Value="10,7"/>
+                                        <Setter Property="Template">
+                                            <Setter.Value>
+                                                <ControlTemplate TargetType="ListBoxItem">
+                                                    <Border x:Name="bd" CornerRadius="8" Padding="{TemplateBinding Padding}"
+                                                            Background="Transparent">
+                                                        <ContentPresenter/>
+                                                    </Border>
+                                                    <ControlTemplate.Triggers>
+                                                        <Trigger Property="IsSelected" Value="True">
+                                                            <Setter TargetName="bd" Property="Background"
+                                                                    Value="{StaticResource AccentSoftBrush}"/>
+                                                        </Trigger>
+                                                        <Trigger Property="IsMouseOver" Value="True">
+                                                            <Setter TargetName="bd" Property="Background"
+                                                                    Value="{StaticResource BgInputBrush}"/>
+                                                        </Trigger>
+                                                    </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
+                                </ListBox.ItemContainerStyle>
+                            </ListBox>
+                            <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,10,0,0">
+                                <Button x:Name="WsOpenButton" Content="Открыть" Click="WsOpen_Click"
+                                        Style="{StaticResource GhostButton}" Margin="0,0,8,0"/>
+                                <Button x:Name="WsDeleteButton" Content="Удалить" Click="WsDelete_Click"
+                                        Style="{StaticResource GhostButton}" Margin="0,0,8,0"/>
+                                <Button x:Name="ZipAllButton" Content="🗜 Zip всё в архив" Click="ZipAll_Click"
+                                        Style="{StaticResource GhostButton}"/>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Column="1" Style="{StaticResource Card}" Width="280" Margin="14,0,0,0" Padding="16">
+                        <StackPanel>
+                            <TextBlock Text="Хранилище" Style="{StaticResource SectionTitle}"/>
+                            <TextBlock x:Name="WsUsageText" Text="0 Б из 1 ГБ" Style="{StaticResource Caption}"/>
+                            <Border Height="8" CornerRadius="4" Background="{StaticResource BgInputBrush}" Margin="0,8,0,4">
+                                <Border x:Name="WsUsageBar" Height="8" CornerRadius="4" Width="0"
+                                        Background="{StaticResource AccentGradient}" HorizontalAlignment="Left"/>
+                            </Border>
+                            <TextBlock x:Name="WsUsageDetail" Style="{StaticResource Caption}"/>
+                            <Border Style="{StaticResource Divider}"/>
+                            <TextBlock Text="Архивы" Style="{StaticResource SectionTitle}"/>
+                            <ListBox x:Name="ArchiveList" Background="Transparent" BorderThickness="0" MaxHeight="200"
+                                     Foreground="{StaticResource TextPrimaryBrush}" FontSize="12"/>
+                            <Border Style="{StaticResource Divider}"/>
+                            <TextBlock Text="Инструменты модели" Style="{StaticResource SectionTitle}"/>
+                            <TextBlock Style="{StaticResource Caption}"
+                                       Text="save_file · append_file · read_file · edit_file · list_files · make_dir · move_path · delete_path · zip_files · unzip_files · list_archives · run_command · send_file"/>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+
+                <!-- WEB SEARCH -->
+                <Border x:Name="WebPage" Style="{StaticResource Card}" Padding="20" Visibility="Collapsed">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel MaxWidth="720" HorizontalAlignment="Left">
+                            <TextBlock Text="Поиск в интернете" Style="{StaticResource H1}"/>
+                            <TextBlock Style="{StaticResource Caption}" Margin="0,6,0,18"
+                                       Text="OLI ищет сам — только когда ему не хватает знаний или нужны актуальные данные. Источники: DuckDuckGo, Bing, Mojeek и Wikipedia; если один заблокирован, используются остальные."/>
+
+                            <CheckBox x:Name="WebSearchMasterToggle" Content="Разрешить поиск" Style="{StaticResource ChipToggle}"
+                                      Margin="0,0,0,16" FontWeight="SemiBold" Checked="WebToggle_Changed" Unchecked="WebToggle_Changed"/>
+
+                            <TextBlock Text="Область поиска" Style="{StaticResource SectionTitle}"/>
+                            <CheckBox x:Name="OpenWebToggle" Content="Весь интернет (кроме чёрного списка)"
+                                      Style="{StaticResource ListCheckBox}" Margin="0,0,0,6" Checked="WebToggle_Changed"
+                                      Unchecked="WebToggle_Changed"/>
+                            <TextBlock Style="{StaticResource Caption}" Margin="25,0,0,16"
+                                       Text="Если выключено — OLI ищет только по сайтам из списка ниже."/>
+
+                            <TextBlock Text="Поисковик" Style="{StaticResource SectionTitle}"/>
+                            <ComboBox x:Name="SearchProviderCombo" Style="{StaticResource FieldComboBox}" Width="260"
+                                      HorizontalAlignment="Left" Margin="0,0,0,18" SelectionChanged="SearchProvider_Changed"/>
+
+                            <TextBlock Text="Лимит результатов" Style="{StaticResource SectionTitle}"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                <Slider x:Name="ResultLimitSlider" Width="240" Minimum="3" Maximum="15"
+                                        TickFrequency="1" IsSnapToTickEnabled="True" Style="{StaticResource FieldSlider}"
+                                        ValueChanged="ResultLimit_Changed"/>
+                                <TextBlock x:Name="ResultLimitText" Margin="12,0,0,0" VerticalAlignment="Center"
+                                           Foreground="{StaticResource TextMutedBrush}" FontSize="12"/>
+                            </StackPanel>
+
+                            <Border Style="{StaticResource Divider}" Margin="0,14"/>
+
+                            <TextBlock Text="Разрешённые сайты (режим «только список»)" Style="{StaticResource SectionTitle}"/>
+                            <ItemsControl x:Name="SitesList" Margin="0,0,0,14">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <CheckBox IsChecked="{Binding IsEnabled, Mode=TwoWay}"
+                                                  Style="{StaticResource ListCheckBox}" Margin="0,3">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="{Binding Name}" FontSize="12.5"
+                                                           Foreground="{StaticResource TextPrimaryBrush}"/>
+                                                <TextBlock Text="{Binding Domain, StringFormat=' — {0}'}" FontSize="11"
+                                                           Foreground="{StaticResource TextMutedBrush}"
+                                                           VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                        </CheckBox>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <TextBlock Text="Чёрный список (никогда не открывать)" Style="{StaticResource SectionTitle}"/>
+                            <TextBox x:Name="BlockedDomainsBox" Style="{StaticResource FieldTextBox}"
+                                     AcceptsReturn="True" Height="70" VerticalScrollBarVisibility="Auto"
+                                     TextWrapping="Wrap" Margin="0,0,0,6"/>
+                            <TextBlock Style="{StaticResource Caption}"
+                                       Text="Домены через запятую или с новой строки. Локальные/internal адреса блокируются всегда."/>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Border>
+
+                <!-- TELEGRAM -->
+                <Border x:Name="TelegramPage" Style="{StaticResource Card}" Padding="20" Visibility="Collapsed">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel MaxWidth="720" HorizontalAlignment="Left">
+                            <TextBlock Text="Telegram-бот" Style="{StaticResource H1}"/>
+                            <TextBlock Style="{StaticResource Caption}" Margin="0,6,0,18"
+                                       Text="OLI может отвечать в Telegram и присылать файлы из workspace. Чтобы бот работал в России при блокировках, поддерживаются три обхода: Cloudflare-релей, прокси и DNS-over-HTTPS."/>
+
+                            <CheckBox x:Name="TelegramEnabledToggle" Content="Включить Telegram-бота"
+                                      Style="{StaticResource ListCheckBox}" FontWeight="SemiBold" Margin="0,0,0,14"
+                                      Checked="TelegramSetting_Changed" Unchecked="TelegramSetting_Changed"/>
+
+                            <TextBlock Text="Токен бота (от @BotFather)" Style="{StaticResource SectionTitle}"/>
+                            <Grid Margin="0,0,0,14">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <PasswordBox x:Name="TelegramTokenBox" Style="{StaticResource FieldPasswordBox}"/>
+                                <Button Grid.Column="1" x:Name="ProbeBotButton" Content="Проверить" Click="ProbeBot_Click"
+                                        Style="{StaticResource GhostButton}" Margin="8,0,0,0"/>
+                            </Grid>
+
+                            <TextBlock Text="Способ обхода блокировки" Style="{StaticResource SectionTitle}"/>
+                            <ComboBox x:Name="TelegramModeCombo" Style="{StaticResource FieldComboBox}" Width="380"
+                                      HorizontalAlignment="Left" Margin="0,0,0,12" SelectionChanged="TelegramMode_Changed"/>
+
+                            <TextBlock x:Name="RelayLabel" Text="Cloudflare-релей (рекомендуется в РФ)"
+                                       Style="{StaticResource SectionTitle}"/>
+                            <TextBox x:Name="TelegramRelayBox" Style="{StaticResource FieldTextBox}"
+                                     Margin="0,0,0,4"/>
+                            <TextBlock Style="{StaticResource Caption}" Margin="0,0,0,12"
+                                       Text="Разверните worker из папки relay/cloudflare-worker (инструкция внутри) и вставьте сюда адрес вида https://oli-bot.ВАШ.workers.dev. Cloudflare доступен из РФ, трафик до Telegram идёт уже с сервера Cloudflare."/>
+
+                            <TextBlock Text="Секрет релея (если задан RELAY_SECRET)" Style="{StaticResource SectionTitle}"/>
+                            <TextBox x:Name="TelegramRelaySecretBox" Style="{StaticResource FieldTextBox}"
+                                     Margin="0,0,0,12"/>
+
+                            <TextBlock Text="Прокси / SOCKS5" Style="{StaticResource SectionTitle}"/>
+                            <TextBox x:Name="TelegramProxyBox" Style="{StaticResource FieldTextBox}"
+                                     Margin="0,0,0,12"/>
+
+                            <CheckBox x:Name="TelegramDohToggle" Content="Разрешать DNS через DoH (обход DNS-блокировки)"
+                                      Style="{StaticResource ListCheckBox}" Margin="0,0,0,14"/>
+
+                            <TextBlock Text="Разрешённые Telegram ID (через запятую, пусто = все)" Style="{StaticResource SectionTitle}"/>
+                            <TextBox x:Name="TelegramAllowedBox" Style="{StaticResource FieldTextBox}"
+                                     Margin="0,0,0,14"/>
+
+                            <CheckBox x:Name="TelegramAllowCommandsToggle"
+                                      Content="Разрешить боту выполнять команды workspace"
+                                      Style="{StaticResource ListCheckBox}" Margin="0,0,0,16"
+                                      Checked="TelegramSetting_Changed" Unchecked="TelegramSetting_Changed"/>
+
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                <Button x:Name="TelegramStartButton" Content="▶ Запустить бота" Click="TelegramStart_Click"
+                                        Style="{StaticResource AccentButton}" Height="36" Margin="0,0,8,0"/>
+                                <Button x:Name="TelegramStopButton" Content="■ Остановить" Click="TelegramStop_Click"
+                                        Style="{StaticResource GhostButton}"/>
+                            </StackPanel>
+                            <TextBlock x:Name="TelegramStatusText" Style="{StaticResource Caption}"/>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Border>
+
+                <!-- SERVER / ADMIN -->
+                <Border x:Name="AdminPage" Style="{StaticResource Card}" Padding="20" Visibility="Collapsed">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel MaxWidth="720" HorizontalAlignment="Left">
+                            <TextBlock Text="Сервер для телефона" Style="{StaticResource H1}"/>
+                            <TextBlock Style="{StaticResource Caption}" Margin="0,6,0,18"
+                                       Text="Этот ПК — сервер OLI. Телефонное приложение регистрируется, входит по логину и паролю и получает личный workspace на 1 ГБ. Пароли хранятся только в виде хеша PBKDF2."/>
+
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                                <Button x:Name="AdminPanelButton" Content="🛰 Открыть пульт администратора"
+                                        Click="OpenAdmin_Click" Style="{StaticResource AccentButton}" Height="36"
+                                        Margin="0,0,8,0"/>
+                                <Button x:Name="ServerStartButton" Content="▶ Запустить сервер" Click="ServerStart_Click"
+                                        Style="{StaticResource GhostButton}" Margin="0,0,8,0"/>
+                                <Button x:Name="ServerStopButton" Content="■ Остановить" Click="ServerStop_Click"
+                                        Style="{StaticResource GhostButton}" Margin="0,0,8,0"/>
+                                <Button x:Name="ServerFirewallButton" Content="🛡 Открыть порт" Click="ServerFirewall_Click"
+                                        Style="{StaticResource GhostButton}"/>
+                            </StackPanel>
+                            <TextBlock x:Name="ServerStatusLine" Style="{StaticResource Caption}" Margin="0,0,0,16"/>
+                            <TextBlock x:Name="ServerAddressLine" Style="{StaticResource Caption}" Margin="0,0,0,16"
+                                       FontFamily="Cascadia Mono, Consolas"/>
+
+                            <Border Style="{StaticResource Divider}"/>
+
+                            <CheckBox x:Name="ServerAutoStartToggle" Content="Запускать сервер вместе с OLI"
+                                      Style="{StaticResource ListCheckBox}" Margin="0,0,0,8"
+                                      Checked="ServerSetting_Changed" Unchecked="ServerSetting_Changed"/>
+                            <CheckBox x:Name="ServerRegistrationToggle" Content="Разрешить регистрацию новых пользователей"
+                                      Style="{StaticResource ListCheckBox}" Margin="0,0,0,8"
+                                      Checked="ServerSetting_Changed" Unchecked="ServerSetting_Changed"/>
+                            <CheckBox x:Name="ServerWorkspaceToggle" Content="Разрешить модели работать с файлами пользователя"
+                                      Style="{StaticResource ListCheckBox}" Margin="0,0,0,14"
+                                      Checked="ServerSetting_Changed" Unchecked="ServerSetting_Changed"/>
+
+                            <TextBlock Text="Порт сервера" Style="{StaticResource SectionTitle}"/>
+                            <TextBox x:Name="ServerPortBox" Style="{StaticResource FieldTextBox}" Width="140"
+                                     HorizontalAlignment="Left" Margin="0,0,0,12"/>
+
+                            <TextBlock Text="Квота на пользователя" Style="{StaticResource SectionTitle}"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                                <Slider x:Name="ServerQuotaSlider" Width="260" Minimum="64" Maximum="10240"
+                                        TickFrequency="64" IsSnapToTickEnabled="True"
+                                        Style="{StaticResource FieldSlider}"/>
+                                <TextBlock x:Name="ServerQuotaText" Margin="12,0,0,0" VerticalAlignment="Center"
+                                           Foreground="{StaticResource TextMutedBrush}" FontSize="12"/>
+                            </StackPanel>
+
+                            <TextBlock Text="Код приглашения (пусто — не требуется)" Style="{StaticResource SectionTitle}"/>
+                            <TextBox x:Name="ServerInviteBox" Style="{StaticResource FieldTextBox}"
+                                     Margin="0,0,0,12"/>
+
+                            <TextBlock Text="Токен администратора (для удалённого пульта)" Style="{StaticResource SectionTitle}"/>
+                            <TextBox x:Name="ServerAdminTokenBox" Style="{StaticResource FieldTextBox}"
+                                     Margin="0,0,0,6"/>
+                            <TextBlock Style="{StaticResource Caption}"
+                                       Text="Если токен задан, /api/admin принимает его в заголовке X-OLI-Admin. Локально пульт работает и без токена (loopback)."/>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Border>
+
+                <!-- CONSOLE -->
+                <Border x:Name="ConsolePage" Style="{StaticResource Card}" Padding="14" Visibility="Collapsed">
+                    <Grid>
+                        <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                        <ListBox x:Name="ConsoleList" Grid.Row="0" Background="Transparent" BorderThickness="0"
+                                 Foreground="{StaticResource TextPrimaryBrush}" FontFamily="Cascadia Mono, Consolas"
+                                 FontSize="12"/>
+                        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,10,0,0">
+                            <Button x:Name="ClearConsoleButton" Content="Очистить" Click="ClearConsole_Click"
+                                    Style="{StaticResource GhostButton}" Margin="0,0,8,0"/>
+                            <Button x:Name="CopyConsoleButton" Content="Скопировать" Click="CopyConsole_Click"
+                                    Style="{StaticResource GhostButton}" Margin="0,0,8,0"/>
+                            <CheckBox x:Name="ConsoleAutoScroll" Content="Автопрокрутка" IsChecked="True"
+                                      Margin="10,0,0,0" VerticalAlignment="Center"
+                                      Foreground="{StaticResource TextMutedBrush}"/>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <!-- Composer -->
+            <Border x:Name="ComposerBorder" Grid.Row="2" Margin="0,14,0,0" Background="{StaticResource BgPanelBrush}"
+                    CornerRadius="16" BorderBrush="{StaticResource BorderBrush2}" BorderThickness="1"
+                    Padding="14,12">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <TextBox x:Name="InputBox" Grid.Row="0" Style="{StaticResource ChatInputBox}"
+                             MinHeight="46" MaxHeight="180" KeyDown="InputBox_KeyDown"/>
+                    <Grid Grid.Row="1" Margin="0,8,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <CheckBox x:Name="SearchChip" Content="Поиск" Style="{StaticResource ChipToggle}"
+                                      IsChecked="True" Checked="SearchChip_Changed" Unchecked="SearchChip_Changed"/>
+                            <CheckBox x:Name="WorkspaceChip" Content="Файлы" Style="{StaticResource ChipToggle}"
+                                      IsChecked="True" Checked="WorkspaceChip_Changed" Unchecked="WorkspaceChip_Changed"/>
+                            <TextBlock x:Name="InputHelpText" FontSize="11" Foreground="{StaticResource TextMutedBrush}"
+                                       VerticalAlignment="Center" TextWrapping="Wrap"
+                                       Text="Enter — отправить · Shift+Enter — новая строка"/>
+                        </StackPanel>
+                        <Button x:Name="SendButton" Grid.Column="1" Content="Отправить  ➤" Width="140" Height="38"
+                                Style="{StaticResource AccentButton}" Click="Send_Click"/>
+                    </Grid>
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</Window>

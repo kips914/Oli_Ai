@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OLI.Core\OLI.Core.csproj" />
+    <ProjectReference Include="..\OLI.Engine\OLI.Engine.csproj" />
+    <ProjectReference Include="..\OLI.Web\OLI.Web.csproj" />
+    <ProjectReference Include="..\OLI.Memory\OLI.Memory.csproj" />
+    <ProjectReference Include="..\OLI.Workspace\OLI.Workspace.csproj" />
+  </ItemGroup>
+</Project>
