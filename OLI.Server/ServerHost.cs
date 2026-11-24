@@ -311,11 +311,20 @@ public sealed class ServerHost : IAsyncDisposable
             try
             {
                 // --- chat thread: found, or created from this first message
-                var thread = _chats.GetOrCreate(account.Id, request.ThreadId, text, modelId);
+                var thread = _chats.Resolve(account.Id, request.ThreadId, text, modelId);
+                if (thread is null)
+                    return Results.Json(new { error = "Чат был удалён на другом устройстве.", deleted = true }, statusCode: 409);
+
                 var threadId = thread.Id;
-                _chats.Append(account.Id, threadId, ChatEntry.User(text));
 
                 var session = GetSession(account);
+                // The model must only remember THIS thread: switching chats used to leave
+                // the previous conversation in the context, so answers mixed two chats.
+                session.UseThread(threadId, thread.Messages);
+
+                if (_chats.Append(account.Id, threadId, ChatEntry.User(text)).ThreadMissing)
+                    return Results.Json(new { error = "Чат был удалён, сообщение не сохранено.", deleted = true }, statusCode: 409);
+
                 session.SelectModel(modelId);
                 session.SetAnswerBudget(exhausted ? 220 : 0);
 
@@ -343,9 +352,18 @@ public sealed class ServerHost : IAsyncDisposable
                 }
 
                 // A deleted thread must not be resurrected by an answer that was in flight.
-                var stored = _chats.Append(account.Id, threadId, ChatEntry.Assistant(answer.Text, answer.FilesToSend));
-                if (stored is null)
+                var append = _chats.Append(account.Id, threadId, ChatEntry.Assistant(answer.Text, answer.FilesToSend));
+                if (append.ThreadMissing)
                     return Results.Json(new { error = "Чат был удалён, ответ не сохранён.", deleted = true }, statusCode: 409);
+                // An empty answer is not an error the user caused: say it plainly instead of
+                // returning text = "" (the phone then showed a "⚠ Пустой ответ" bubble).
+                if (append.Entry is null && string.IsNullOrWhiteSpace(answer.Text))
+                    return Results.Json(new
+                    {
+                        error = "Модель не вернула текст. Попробуйте ещё раз или выберите другую модель.",
+                        hint = "empty",
+                        threadId,
+                    }, statusCode: 502);
 
                 var completionTokens = TokenEstimator.Estimate(answer.Text);
                 _usage.Add(new UsageEntry
@@ -502,15 +520,7 @@ public sealed class ServerHost : IAsyncDisposable
                 id = thread.Id,
                 title = thread.TitleOrFallback,
                 modelId = thread.ModelId,
-                messages = thread.Messages.Select(m => new
-                {
-                    id = m.Id,
-                    // "user" / "assistant" on the wire, ChatRole in code.
-                    role = m.Role == ChatRole.User ? "user" : "assistant",
-                    text = ChatCore.VisibleText(m),
-                    at = m.At,
-                    files = m.Files,
-                }),
+                messages = thread.Messages.Select(MessageJson),
             });
         });
 
@@ -529,6 +539,7 @@ public sealed class ServerHost : IAsyncDisposable
             var account = CurrentAccount(http);
             if (account is null) return Unauthorized();
             var model = string.IsNullOrWhiteSpace(request.ModelId) ? _options.Model : request.ModelId;
+            // An empty "+" chat must be called "Новый чат", not stuck at "Чат" forever.
             var thread = _chats.Create(account.Id, request.Title, model);
             return Results.Json(new { id = thread.Id, title = thread.TitleOrFallback });
         });
@@ -693,7 +704,23 @@ public sealed class ServerHost : IAsyncDisposable
 
             try
             {
+                // Vision goes into the same chat history as normal turns: a photo sent from
+                // the phone used to vanish on restart, because only /api/chat wrote to the
+                // thread store.
+                var thread = _chats.Resolve(account.Id, request.ThreadId, question, modelId);
+                if (thread is null)
+                    return Results.Json(new { error = "Чат был удалён на другом устройстве.", deleted = true }, statusCode: 409);
+
+                var threadId = thread.Id;
+                session.UseThread(threadId, thread.Messages);
+                if (request.ThreadId is null)
+                    _chats.Append(account.Id, threadId, ChatEntry.User(question, files: [SafeRelative(request.Path ?? "")]));
+
                 var answer = await session.SendAsync(prompt, progress: null, ct);
+
+                var visionAppend = _chats.Append(account.Id, threadId, ChatEntry.Assistant(answer.Text));
+                if (visionAppend.ThreadMissing)
+                    return Results.Json(new { error = "Чат был удалён, ответ не сохранён.", deleted = true }, statusCode: 409);
 
                 var promptTokens = TokenEstimator.Estimate(prompt) + 700;
                 var completionTokens = TokenEstimator.Estimate(answer.Text);
@@ -710,6 +737,7 @@ public sealed class ServerHost : IAsyncDisposable
                 {
                     text = answer.Text,
                     path = request.Path,
+                    threadId,
                     model = modelId == _options.LiteModel ? "Olim Son" : "Olim Pass",
                     modelId,
                     limited = exhausted,
@@ -959,6 +987,19 @@ public sealed class ServerHost : IAsyncDisposable
 
     private static string SafeRelative(string path) => path.Replace('\\', '/');
 
+    /// <summary>
+    /// One message on the wire. Shared by the desktop and the phone, so a bubble looks
+    /// identical everywhere: role, visible text, time, attachments.
+    /// </summary>
+    private static object MessageJson(ChatEntry m) => new
+    {
+        id = m.Id,
+        role = m.Role == ChatRole.User ? "user" : "assistant",
+        text = ChatCore.VisibleText(m),
+        at = m.At,
+        files = m.Files,
+    };
+
     private static bool IsImageName(string name)
     {
         var ext = Path.GetExtension(name).ToLowerInvariant();
@@ -1090,7 +1131,7 @@ public sealed class ServerHost : IAsyncDisposable
     public sealed record NewChatRequest(string? Title, string? ModelId);
     public sealed record RenameChatRequest(string? Title);
     public sealed record WriteFileRequest(string? Path, string? Content, bool Append);
-    public sealed record VisionRequest(string? Path, string? Question);
+    public sealed record VisionRequest(string? Path, string? Question, string? ThreadId);
     public sealed record DeleteFileRequest(string? Path, bool Recursive);
     public sealed record AdminQuotaRequest(string? AccountId, long QuotaBytes);
     public sealed record AdminDisableRequest(string? AccountId, bool Disabled);

@@ -128,12 +128,26 @@ public sealed class ChatStore
         }
     }
 
+    /// <summary>
+    /// Copy of one thread, safe to serialise after the lock is released. The previous
+    /// version returned the live object, so a chat answer being appended while the phone
+    /// fetched the same thread could throw "Collection was modified" (a 500 with no reason).
+    /// </summary>
     public ChatThread? Get(string accountId, string threadId)
     {
         if (string.IsNullOrWhiteSpace(threadId)) return null;
         var state = For(accountId);
         lock (state.Lock)
-            return state.Threads.FirstOrDefault(t => t.Id == threadId);
+            return Snapshot(state.Threads.FirstOrDefault(t => t.Id == threadId));
+    }
+
+    /// <summary>True when the account still has this thread (used to refuse resurrection).</summary>
+    public bool Exists(string accountId, string threadId)
+    {
+        if (string.IsNullOrWhiteSpace(threadId)) return false;
+        var state = For(accountId);
+        lock (state.Lock)
+            return state.Threads.Any(t => t.Id == threadId);
     }
 
     /// <summary>The most recent thread, used when the phone asks for "the current chat".</summary>
@@ -141,8 +155,18 @@ public sealed class ChatStore
     {
         var state = For(accountId);
         lock (state.Lock)
-            return state.Threads.OrderByDescending(t => t.UpdatedAt).FirstOrDefault();
+            return Snapshot(state.Threads.OrderByDescending(t => t.UpdatedAt).FirstOrDefault());
     }
+
+    private static ChatThread? Snapshot(ChatThread? thread) => thread is null ? null : new ChatThread
+    {
+        Id = thread.Id,
+        Title = thread.Title,
+        ModelId = thread.ModelId,
+        CreatedAt = thread.CreatedAt,
+        UpdatedAt = thread.UpdatedAt,
+        Messages = thread.Messages.ToList(),
+    };
 
     // ------------------------------------------------------------------ writes
 
@@ -162,12 +186,21 @@ public sealed class ChatStore
         }
     }
 
-    /// <summary>Finds a thread or creates it from the first message of a chat request.</summary>
-    public ChatThread GetOrCreate(string accountId, string? threadId, string? firstMessage, string modelId)
+    /// <summary>
+    /// Resolves the thread for a chat request. A named thread must exist: silently creating
+    /// a new one would resurrect a conversation the user has just deleted (the phone kept
+    /// sending the old id and a "deleted" chat kept coming back).
+    /// </summary>
+    public ChatThread? Resolve(string accountId, string? threadId, string? firstMessage, string modelId)
     {
-        var existing = Get(accountId, threadId ?? "");
-        return existing ?? Create(accountId, firstMessage, modelId);
+        if (!string.IsNullOrWhiteSpace(threadId))
+            return Get(accountId, threadId);
+        return Create(accountId, firstMessage, modelId);
     }
+
+    /// <summary>Finds a thread or creates it (used where a new thread is acceptable).</summary>
+    public ChatThread GetOrCreate(string accountId, string? threadId, string? firstMessage, string modelId) =>
+        Resolve(accountId, threadId, firstMessage, modelId) ?? Create(accountId, firstMessage, modelId);
 
     public bool Rename(string accountId, string threadId, string? title)
     {
@@ -199,14 +232,18 @@ public sealed class ChatStore
     /// thread no longer exists — the caller must then drop the answer instead of
     /// resurrecting a deleted chat.
     /// </summary>
-    public ChatEntry? Append(string accountId, string threadId, ChatEntry entry)
+    public AppendResult Append(string accountId, string threadId, ChatEntry entry)
     {
-        if (!ChatCore.IsPersistable(entry) && entry.Role != ChatRole.User) return null;
         var state = For(accountId);
         lock (state.Lock)
         {
             var thread = state.Threads.FirstOrDefault(t => t.Id == threadId);
-            if (thread is null) return null;
+            // The caller shows "чат был удалён" only for this case — not when the model
+            // simply produced nothing (that used to be reported as a deleted chat).
+            if (thread is null) return new AppendResult(null, ThreadMissing: true);
+
+            if (!ChatCore.IsPersistable(entry) && entry.Role != ChatRole.User)
+                return new AppendResult(null, ThreadMissing: false);
 
             var stored = entry with { Text = ChatCore.Clean(entry.Text), At = DateTimeOffset.UtcNow, Pending = false };
             thread.Messages.Add(stored);
@@ -217,7 +254,7 @@ public sealed class ChatStore
 
             thread.UpdatedAt = DateTimeOffset.UtcNow;
             SaveLocked(accountId, state);
-            return stored;
+            return new AppendResult(stored, ThreadMissing: false);
         }
     }
 
@@ -256,6 +293,9 @@ public sealed class ChatStore
         }
     }
 }
+
+/// <summary>Result of <see cref="ChatStore.Append"/>: the stored entry, and whether the thread still exists.</summary>
+public readonly record struct AppendResult(ChatEntry? Entry, bool ThreadMissing);
 
 /// <summary>A saved conversation.</summary>
 public sealed class ChatThread

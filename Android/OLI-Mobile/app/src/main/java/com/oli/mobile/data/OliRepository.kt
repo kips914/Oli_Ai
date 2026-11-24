@@ -416,6 +416,8 @@ class OliRepository(private val context: Context) {
 
             // The user may have switched or deleted this chat while the answer was being
             // generated: drop the answer instead of mixing two conversations together.
+            // (The finally block still clears `busy` — otherwise the "typing" bubble
+            // would stay on screen forever, which is exactly what users reported.)
             if (epoch != chatEpoch) return null
 
             if (reply.text.isBlank()) {
@@ -478,7 +480,12 @@ class OliRepository(private val context: Context) {
         _busy.value = true
         try {
             val path = api.uploadImage(fileName.ifBlank { "photo.jpg" }, bytes)
-            val reply = api.vision(path, prompt)
+            // Same chat as the text messages: the photo and its answer are stored in the
+            // thread, so reopening the conversation still shows them.
+            val reply = api.vision(path, prompt, _activeThread.value)
+            if (reply.threadId.isNotBlank() && _activeThread.value.isNullOrBlank()) {
+                _activeThread.value = reply.threadId
+            }
             _messages.value = _messages.value + ChatMessage(
                 nextId++, fromUser = false, text = reply.text.ifBlank { "Не удалось разобрать изображение." }
             )
@@ -534,6 +541,22 @@ class OliRepository(private val context: Context) {
 
     // ------------------------------------------------------------- chats & limits
 
+    /**
+     * Opens the conversation the user left last time, so the app does not look empty after
+     * a restart. A brand-new account simply has no threads and stays on the empty screen.
+     */
+    suspend fun restoreLastChat() {
+        if (isDemo) return
+        if (!_activeThread.value.isNullOrBlank() || _messages.value.isNotEmpty()) return
+        try {
+            refreshChats()
+            val latest = _chats.value.firstOrNull() ?: return
+            openChat(latest.id)
+        } catch (_: Exception) {
+            // No chats yet or no network: the empty screen is the right answer.
+        }
+    }
+
     suspend fun refreshChats() {
         if (isDemo) return
         try {
@@ -551,7 +574,7 @@ class OliRepository(private val context: Context) {
             return
         }
         _messages.value = try {
-            api.chatMessages(threadId).map { ChatMessage(nextId++, fromUser = it.fromUser, text = it.text) }
+            api.chatMessages(threadId).map { ChatMessage(nextId++, fromUser = it.fromUser, text = it.text, files = it.files) }
         } catch (e: Exception) {
             listOf(ChatMessage(nextId++, fromUser = false, text = "⚠ Не удалось открыть чат: ${e.message}"))
         }

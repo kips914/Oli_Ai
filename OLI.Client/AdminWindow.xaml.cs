@@ -219,6 +219,9 @@ public partial class AdminWindow : Window
 
     private void TunnelLog_Click(object sender, RoutedEventArgs e)
     {
+        // Closing the log must also drop the "phone test" report flag, otherwise the next
+        // real journal lines would never replace the report text.
+        _phoneReportShown = false;
         var showing = TunnelLogText.Visibility != Visibility.Visible;
         TunnelLogText.Visibility = showing ? Visibility.Visible : Visibility.Collapsed;
         TunnelLogButton.Content = showing ? "Скрыть журнал" : "Журнал";

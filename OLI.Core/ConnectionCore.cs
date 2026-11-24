@@ -200,6 +200,13 @@ public static class ConnectionCore
         return engineAlive == true ? ConnectionState.Ready : ConnectionState.EngineDown;
     }
 
+    /// <summary>
+    /// Classification of a real /api/health payload. Kept here so the PC's "Проверить путь
+    /// телефона", the phone and the tests all read the same fields with the same rules.
+    /// </summary>
+    public static ConnectionState ClassifyHealth(bool answered, string? service, bool? engineAlive) =>
+        Classify(answered, service, engineAlive, null);
+
     /// <summary>One sentence for the state — the same words on the PC and on the phone.</summary>
     public static string Describe(ConnectionState state, string? address = null, string? engine = null, string? detail = null)
     {

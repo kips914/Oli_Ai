@@ -96,7 +96,36 @@ public sealed class AgentSession : IDisposable
     public void Reset()
     {
         lock (_historyLock) _history.Clear();
+        _loadedThread = "";
     }
+
+    /// <summary>
+    /// The thread the in-memory history belongs to. The server switches between the user's
+    /// threads, and without this the model would remember the previous chat — the single
+    /// most confusing bug of the old chat core.
+    /// </summary>
+    private string _loadedThread = "";
+
+    /// <summary>
+    /// Points the session at a chat thread. When the thread changes, the history is
+    /// replaced by that thread's transcript (so "продолжи прошлую мысль" works after a
+    /// restart) — and never mixes two conversations together.
+    /// </summary>
+    public void UseThread(string threadId, IReadOnlyList<ChatEntry> history)
+    {
+        var id = threadId ?? "";
+        lock (_historyLock)
+        {
+            if (string.Equals(_loadedThread, id, StringComparison.Ordinal)) return;
+            _loadedThread = id;
+            _history.Clear();
+            foreach (var item in ChatCore.ToModelHistory(history))
+                _history.Add(item);
+        }
+    }
+
+    /// <summary>Id of the thread the history belongs to ("" for the desktop single chat).</summary>
+    public string LoadedThread => _loadedThread;
 
     public async Task<AgentAnswer> SendAsync(
         string userText,

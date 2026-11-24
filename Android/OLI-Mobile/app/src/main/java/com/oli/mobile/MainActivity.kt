@@ -87,7 +87,8 @@ private fun OliApp() {
     LaunchedEffect(session) {
         if (session is OliRepository.Session.SignedIn || session is OliRepository.Session.Demo) {
             repo.refreshModels()
-            repo.refreshChats()
+            // Reopen the last conversation instead of an empty screen after a restart.
+            repo.restoreLastChat()
         }
     }
 

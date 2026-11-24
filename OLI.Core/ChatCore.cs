@@ -24,8 +24,8 @@ public sealed record ChatEntry
     /// <summary>Engine or server error attached to this message (shown in red).</summary>
     public string? Error { get; init; }
 
-    public static ChatEntry User(string text) =>
-        new() { Role = ChatRole.User, Text = ChatCore.Clean(text) };
+    public static ChatEntry User(string text, IReadOnlyList<string>? files = null) =>
+        new() { Role = ChatRole.User, Text = ChatCore.Clean(text), Files = files ?? [] };
 
     public static ChatEntry Assistant(string text, IReadOnlyList<string>? files = null) =>
         new() { Role = ChatRole.Assistant, Text = ChatCore.Clean(text), Files = files ?? [] };

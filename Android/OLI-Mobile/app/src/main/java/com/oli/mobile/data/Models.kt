@@ -83,7 +83,12 @@ data class ChatSummary(
     val updatedAt: String
 )
 
-data class StoredChatMessage(val fromUser: Boolean, val text: String)
+data class StoredChatMessage(
+    val fromUser: Boolean,
+    val text: String,
+    /** Workspace files the answer produced (📎 line under the bubble). */
+    val files: List<String> = emptyList()
+)
 
 /** Live values mirrored from the last /api/chat response so the composer can show them. */
 object UsageSnapshot {

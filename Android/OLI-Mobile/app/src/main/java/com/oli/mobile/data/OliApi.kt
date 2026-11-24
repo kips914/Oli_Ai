@@ -371,10 +371,15 @@ class OliApi private constructor() {
         val result = mutableListOf<StoredChatMessage>()
         for (i in 0 until array.length()) {
             val m = array.getJSONObject(i)
+            val files = mutableListOf<String>()
+            m.optJSONArray("files")?.let { array ->
+                for (j in 0 until array.length()) files.add(array.optString(j))
+            }
             result.add(
                 StoredChatMessage(
                     fromUser = m.optString("role") == "user",
-                    text = m.optString("text")
+                    text = m.optString("text"),
+                    files = files
                 )
             )
         }
@@ -531,8 +536,10 @@ class OliApi private constructor() {
     }
 
     /** Asks the server to analyse an uploaded image; the answer arrives as chat text. */
-    suspend fun vision(path: String, question: String): ChatReply {
-        val json = call("/api/vision", "POST", JSONObject().put("path", path).put("question", question))
+    suspend fun vision(path: String, question: String, threadId: String?): ChatReply {
+        val body = JSONObject().put("path", path).put("question", question)
+        if (!threadId.isNullOrBlank()) body.put("threadId", threadId)
+        val json = call("/api/vision", "POST", body)
         json.optJSONObject("usage")?.let { u ->
             UsageSnapshot.hourUsed = u.optLong("hourUsed")
             UsageSnapshot.hourLimit = u.optInt("hourLimit")
@@ -545,7 +552,7 @@ class OliApi private constructor() {
         return ChatReply(
             text = json.optString("text"),
             files = emptyList(),
-            threadId = "",
+            threadId = json.optString("threadId"),
             limited = json.optBoolean("limited", false),
             modelName = json.optString("model", "")
         )

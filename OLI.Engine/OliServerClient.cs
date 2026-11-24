@@ -89,7 +89,8 @@ public sealed class OliServerClient : IDisposable
                 var model = Str(root, "model");
                 var engineAlive = root.TryGetProperty("llama", out var llama) && llama.ValueKind == JsonValueKind.True;
 
-                var state = ConnectionCore.Classify(true, service, engineAlive, string.IsNullOrWhiteSpace(service) ? null : service == "oli-server");
+                // One rule for every client: a missing/foreign "service" field is not OLI.
+                var state = ConnectionCore.ClassifyHealth(true, service, engineAlive);
                 return new ProbeResult(state, target, version, engine, model, lastStatus, ConnectionCore.Describe(state, target, engine));
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)

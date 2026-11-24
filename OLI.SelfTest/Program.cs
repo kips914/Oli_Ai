@@ -363,6 +363,10 @@ Check("another service is NotOli",
     () => ConnectionCore.Classify(true, "nginx", true, false) == ConnectionState.NotOli);
 Check("state sentences mention the engine when it is down",
     () => ConnectionCore.Describe(ConnectionState.EngineDown, "http://a:1").Contains("движок"));
+Check("a health answer without a service field is not OLI",
+    () => ConnectionCore.ClassifyHealth(true, "", true) == ConnectionState.NotOli);
+Check("ClassifyHealth is the same rule as Classify",
+    () => ConnectionCore.ClassifyHealth(true, "oli-server", false) == ConnectionState.EngineDown);
 Check("Every state has its own sentence", () =>
     Enum.GetValues<ConnectionState>().All(s => ConnectionCore.Describe(s).Length > 10));
 Check("ServerDown sentence tells the user what to press",
@@ -408,6 +412,8 @@ Check("newline in the first message does not break the title",
     () => !ChatCore.MakeTitle("first line\nsecond line").Contains('\n'));
 
 Console.WriteLine("ChatCore · history for the model");
+Check("a photo attached to a message is kept on the bubble",
+    () => ChatEntry.User("что на фото?", files: ["photo.jpg"]).Files.SequenceEqual(["photo.jpg"]));
 Check("failures are not sent to the model",
     () => ChatCore.ToModelHistory([ChatEntry.User("hi"), ChatEntry.Failure("boom")]).Count == 1);
 Check("pending bubbles are not sent",
@@ -456,13 +462,33 @@ Check("created thread is listed", () => store.List("acc1").Any(t => t.Id == firs
 Check("title is taken from the first message",
     () => store.List("acc1").First().Title.StartsWith("Первый вопрос"));
 Check("append returns the stored entry with a server id", () =>
-    store.Append("acc1", firstThread.Id, ChatEntry.User("hello")) is { Text: "hello" } stored && stored.Id.Length > 0);
-Check("append to a deleted thread returns null",
-    () => store.Append("acc1", "missing", ChatEntry.Assistant("x")) is null);
+    store.Append("acc1", firstThread.Id, ChatEntry.User("hello")).Entry is { Text: "hello" } stored && stored.Id.Length > 0);
+Check("append to a deleted thread is reported as a missing thread",
+    () => store.Append("acc1", "missing", ChatEntry.Assistant("x")).ThreadMissing);
+Check("an empty answer is NOT reported as a deleted thread", () =>
+    store.Append("acc1", firstThread.Id, ChatEntry.Assistant("")) is { ThreadMissing: false, Entry: null });
 Check("messages are persisted and reloaded", () =>
 {
     var reloaded = new OLI.Server.Chats.ChatStore(chatRoot);
     return reloaded.Get("acc1", firstThread.Id)?.Messages.Count >= 1;
+});
+Check("a read never hands out the live thread (no 'Collection was modified')", () =>
+{
+    var thread = store.Create("acc7", "snapshot", "oli-pass");
+    store.Append("acc7", thread.Id, ChatEntry.User("первое"));
+    var copy = store.Get("acc7", thread.Id)!;
+    store.Append("acc7", thread.Id, ChatEntry.User("второе"));
+    // The copy must not have changed under us while the server serialised it.
+    return copy.Messages.Count == 1 && store.Get("acc7", thread.Id)!.Messages.Count == 2;
+});
+Check("a deleted thread is not recreated by Resolve",
+    () => store.Resolve("acc7", "gone-forever", "привет", "oli-pass") is null);
+Check("Resolve creates a thread when no id is given",
+    () => store.Resolve("acc7", null, "новый вопрос", "oli-pass")?.Title == "новый вопрос");
+Check("Exists tells the server whether the thread is still alive", () =>
+{
+    var thread = store.Create("acc7", "жив ли", "oli-pass");
+    return store.Exists("acc7", thread.Id) && !store.Exists("acc7", "nope");
 });
 Check("parallel appends from two threads do not lose messages", () =>
 {
@@ -581,6 +607,15 @@ await using (var live = new OLI.Server.ServerHost(new OLI.Server.ServerOptions
     var deleteSucceeded = await client.DeleteChatAsync(freshId ?? "");
     Check("delete over HTTP works", () => deleteSucceeded);
     await CheckAsync("latest chat falls back after delete", async () => await client.LatestChatAsync() != freshId);
+
+    // The phone keeps the deleted id in memory for a moment: the server must refuse it
+    // instead of quietly creating a new chat under the same idea ("чат вернулся сам").
+    var deletedChat = await client.SendAsync("привет", freshId, default);
+    Check("sending to a deleted chat is refused, not silently recreated", () =>
+        deletedChat.HttpStatus == 409 && !deletedChat.Ok);
+
+    var afterDelete = await client.ListChatsAsync();
+    Check("the deleted chat did not come back", () => afterDelete.All(t => t.Id != freshId));
 }
 
 try { Directory.Delete(liveRoot, true); } catch { }
