@@ -526,6 +526,112 @@ Check("latest thread is returned for 'current chat'",
     () => store.Latest("acc1") is not null);
 try { Directory.Delete(chatRoot, true); } catch { }
 
+// ------------------------------------------------------------ setup & components
+// First launch now installs what OLI needs and proves the connection works. These checks
+// pin the rules that decide "is the tunnel binary usable" and "what exactly is broken".
+
+Console.WriteLine("ComponentInstaller");
+var componentDir = Path.Combine(Path.GetTempPath(), "oli-comp-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(componentDir);
+try
+{
+    var spec = new ComponentSpec("test", "Тестовый файл", "tool.exe",
+        "https://example.invalid/tool.exe", "", "нужен для теста");
+
+    Check("missing component is reported as missing",
+        () => ComponentInstaller.Inspect(Path.Combine(componentDir, "tool.exe"), spec) == ComponentState.Missing);
+
+    var truncated = Path.Combine(componentDir, "tool.exe");
+    File.WriteAllBytes(truncated, new byte[100]);
+    Check("a tiny file is broken, not accepted",
+        () => ComponentInstaller.Inspect(truncated, spec) == ComponentState.Broken);
+
+    // A real executable header ("MZ") with a plausible size stands in for cloudflared.
+    var bytes = new byte[2 * 1024 * 1024];
+    bytes[0] = (byte)'M';
+    bytes[1] = (byte)'Z';
+    File.WriteAllBytes(truncated, bytes);
+    Check("a downloaded program with an MZ header is accepted",
+        () => ComponentInstaller.Inspect(truncated, spec) == ComponentState.Ready);
+
+    // An HTML error page saved with .exe must never be "installed" and then executed.
+    File.WriteAllText(truncated, "<html>blocked by proxy</html>");
+    Check("an HTML page saved as .exe is rejected",
+        () => ComponentInstaller.Inspect(truncated, spec) == ComponentState.Broken);
+
+    var wrongHash = spec with { Sha256 = new string('A', 64) };
+    File.WriteAllBytes(truncated, bytes);
+    Check("a pinned hash mismatch is rejected",
+        () => ComponentInstaller.Inspect(truncated, wrongHash) == ComponentState.Broken);
+
+    var rightHash = spec with { Sha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)) };
+    Check("a matching pinned hash is accepted",
+        () => ComponentInstaller.Inspect(truncated, rightHash) == ComponentState.Ready);
+
+    Check("a failed download does not leave a broken file behind", () =>
+    {
+        // No network here: the installer must report a failure and keep the target untouched.
+        var broken = Path.Combine(componentDir, "never.exe");
+        var dead = spec with { Id = "dead", FileName = "never.exe", Url = "http://127.0.0.1:9/x.exe", MirrorUrl = null };
+        var report = new ComponentInstaller(componentDir).EnsureAsync(dead).GetAwaiter().GetResult();
+        return report.State == ComponentState.Failed && report.Error.Length > 0 && !File.Exists(broken);
+    });
+}
+finally
+{
+    try { Directory.Delete(componentDir, true); } catch { }
+}
+
+Check("every known component has a name and a reason for the user",
+    () => ComponentInstaller.Known.All(c => c.DisplayName.Length > 0 && c.Why.Length > 0));
+
+Console.WriteLine("SetupCheckCore");
+Check("all-good check summarises as 'готово'", () =>
+{
+    var check = SetupCheckCore.RunAsync(6767, true, "https://x.trycloudflare.com",
+        ["192.168.1.10"], _ => Task.FromResult(true)).GetAwaiter().GetResult();
+    return check.AllOk && check.Summary.Contains("готово", StringComparison.OrdinalIgnoreCase);
+});
+Check("a dead local server is reported with an action, not a generic error", () =>
+{
+    var check = SetupCheckCore.RunAsync(6767, true, null, [], _ => Task.FromResult(false)).GetAwaiter().GetResult();
+    var step = check.Steps.First(s => s.Title == "Сервер OLI");
+    return step.State == SetupStepState.Failed && step.Action == "Запустить сервер"
+        && check.Summary.Contains("Запустить сервер");
+});
+Check("loopback works but LAN does not → firewall is named as the cause", () =>
+{
+    var check = SetupCheckCore.RunAsync(6767, true, null, ["192.168.1.10"],
+        url => Task.FromResult(url.Contains("127.0.0.1"))).GetAwaiter().GetResult();
+    var step = check.Steps.First(s => s.Title == "Адрес в Wi-Fi");
+    return step.State == SetupStepState.Failed && step.Action == "Открыть порт"
+        && step.Detail.Contains("брандмауэр", StringComparison.OrdinalIgnoreCase);
+});
+Check("a tunnel address that does not answer is a failed step", () =>
+{
+    var check = SetupCheckCore.RunAsync(6767, true, "https://x.trycloudflare.com", ["192.168.1.10"],
+        url => Task.FromResult(!url.Contains("trycloudflare"))).GetAwaiter().GetResult();
+    var step = check.Steps.First(s => s.Title == "Доступ из интернета");
+    return step.State == SetupStepState.Failed && step.Action == "Журнал туннеля";
+});
+Check("no LAN address at all is a warning, not a failure", () =>
+{
+    var check = SetupCheckCore.RunAsync(6767, false, null, [], _ => Task.FromResult(false)).GetAwaiter().GetResult();
+    return check.Steps.Any(s => s.Title == "Адрес в Wi-Fi" && s.State == SetupStepState.Warning)
+        && check.Steps.Any(s => s.Title == "Сервер OLI" && s.State == SetupStepState.Skipped);
+});
+Check("a disabled tunnel is skipped, not reported as broken", () =>
+{
+    var check = SetupCheckCore.RunAsync(6767, true, null, ["192.168.1.10"], _ => Task.FromResult(true))
+        .GetAwaiter().GetResult();
+    return check.Steps.Any(s => s.Title == "Доступ из интернета" && s.State == SetupStepState.Skipped);
+});
+Check("every step line starts with a readable marker", () =>
+{
+    var check = SetupCheckCore.RunAsync(6767, true, null, [], _ => Task.FromResult(true)).GetAwaiter().GetResult();
+    return check.Lines.All(l => l.Length > 3 && "✓⚠✗·".Contains(l[0]));
+});
+
 // ------------------------------------------------------------ live server round-trip
 // Start the real OLI server on a free port and walk the exact phone path:
 // health → register → login → chat thread → drawer → rename → delete. The model engine
