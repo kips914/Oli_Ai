@@ -390,13 +390,17 @@ class OliRepository(private val context: Context) {
      */
     suspend fun diagnoseConnection(): String? = withContext(Dispatchers.IO) {
         val target = (api.baseUrl.ifBlank { serverUrl }).trimEnd('/')
-        val health = try {
-            api.health(target)
+        var health: ServerHealth
+        try {
+            health = api.health(target)
         } catch (e: Exception) {
-            return@withContext api.explain(target, e)
+            // The saved address may be stale (the PC's IP changed). Look around before
+            // telling the user "компьютер не ответил" — the beacon usually has the answer.
+            val rediscovered = runCatching { findOwnServer() }.getOrNull()
+            if (rediscovered.isNullOrBlank()) return@withContext api.explain(target, e)
+            health = runCatching { api.health(rediscovered) }.getOrNull()
+                ?: return@withContext api.explain(target, e)
         }
-        // health() restores the previous baseUrl on failure; keep the reachable one.
-        api.baseUrl = target
         if (!health.ok) return@withContext "Сервер OLI на ПК ответил неожиданно — проверьте версию OLI."
         if (!health.llama) {
             val engine = health.engine.ifBlank { "движок модели" }
@@ -409,7 +413,11 @@ class OliRepository(private val context: Context) {
     suspend fun send(text: String): String? {
         if (text.isBlank()) return null
         val clean = text.trim()
+        // Captured before the suspension points: if the user switches chat while the
+        // answer is being generated, the answer must be dropped, not shown in the wrong
+        // conversation.
         val epoch = chatEpoch
+        val activeThread = _activeThread.value
         _messages.value = _messages.value + ChatMessage(nextId++, fromUser = true, text = clean)
 
         if (isDemo) {
@@ -423,7 +431,7 @@ class OliRepository(private val context: Context) {
 
         _busy.value = true
         return try {
-            val reply = chatGate.withLock { api.chat(clean, _activeThread.value) }
+            val reply = chatGate.withLock { api.chat(clean, activeThread) }
 
             // The user may have switched or deleted this chat while the answer was being
             // generated: drop the answer instead of mixing two conversations together.
@@ -596,6 +604,9 @@ class OliRepository(private val context: Context) {
         _activeThread.value = null
         _messages.value = emptyList()
         if (isDemo) return null
+        // The new chat must not remember the previous one: the server keeps the model
+        // context per session, and this call is what switches it off.
+        runCatching { api.resetChat() }
         return try {
             val id = api.newChat()
             _activeThread.value = id

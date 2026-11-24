@@ -402,8 +402,15 @@ class OliApi private constructor() {
         call("/api/chats/" + URLEncoder.encode(id, "UTF-8"), "DELETE")
     }
 
-    suspend fun resetChat() {
-        call("/api/chat/reset", "POST", JSONObject())
+    /**
+     * Forgets the model's context. The server clears the session history, so this must be
+     * called when the user starts a new chat — otherwise the model would still remember
+     * the previous conversation.
+     */
+    suspend fun resetChat(threadId: String? = null) {
+        val body = JSONObject()
+        if (!threadId.isNullOrBlank()) body.put("threadId", threadId)
+        call("/api/chat/reset", "POST", body)
     }
 
     // ---------------------------------------------------------------- files
