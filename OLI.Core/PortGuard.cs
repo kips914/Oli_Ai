@@ -24,14 +24,22 @@ public sealed record PortOwner(int Port, int ProcessId, string ProcessName, stri
 /// </summary>
 public static class PortGuard
 {
-    /// <summary>True when the port can be bound right now (0.0.0.0, the way Kestrel does it).</summary>
-    public static bool IsFree(int port)
+    /// <summary>
+    /// True when the port can be bound right now on the address the server will really use.
+    /// Checking 0.0.0.0 while the server binds 127.0.0.1 gives a false "free", and Kestrel
+    /// then fails to bind — the exact mismatch that produced the reported stack trace.
+    /// </summary>
+    public static bool IsFree(int port, string? host = null)
     {
         if (port is < 1 or > 65535) return false;
+        var address = string.IsNullOrWhiteSpace(host) || host == "0.0.0.0" || host == "*"
+            ? IPAddress.Any
+            : IPAddress.TryParse(host, out var parsed) ? parsed : IPAddress.Any;
+
         TcpListener? listener = null;
         try
         {
-            listener = new TcpListener(IPAddress.Any, port);
+            listener = new TcpListener(address, port);
             listener.Start();
             return true;
         }
@@ -46,17 +54,63 @@ public static class PortGuard
     }
 
     /// <summary>
+    /// True when something already accepts connections on the address. This is the reliable
+    /// question: on Unix a second bind may succeed thanks to SO_REUSEADDR while Kestrel's
+    /// exclusive bind still fails, so "can I bind" alone is not enough.
+    /// </summary>
+    public static bool IsListening(int port, string? host = null)
+    {
+        if (port is < 1 or > 65535) return false;
+        var address = string.IsNullOrWhiteSpace(host) || host is "0.0.0.0" or "*"
+            ? "127.0.0.1"
+            : host;
+
+        try
+        {
+            using var client = new TcpClient();
+            var task = client.ConnectAsync(address, port);
+            return task.Wait(TimeSpan.FromMilliseconds(400)) && client.Connected;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// True when an OLI server (not some other app) answers on this port. This is the one
+    /// question worth asking before starting a second copy: a live OLI should be reused,
+    /// while a foreign program just means "pick another port".
+    /// </summary>
+    public static async Task<bool> OliAnswersAsync(int port, CancellationToken ct = default)
+    {
+        if (port is < 1 or > 65535) return false;
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+            using var response = await http.GetAsync($"http://127.0.0.1:{port}/api/health", ct);
+            if (!response.IsSuccessStatusCode) return false;
+            var body = await response.Content.ReadAsStringAsync(ct);
+            return body.Contains("\"service\":\"oli-server\"", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// First free port at or after <paramref name="preferred"/> — used to move OLI onto a
     /// working port automatically instead of asking the user to read netstat.
     /// </summary>
-    public static int FindFree(int preferred, int attempts = 20)
+    public static int FindFree(int preferred, int attempts = 20, string? host = null)
     {
         for (var offset = 0; offset < attempts; offset++)
         {
             var port = preferred + offset;
             if (port > 65535) break;
             if (port < 1024) continue;
-            if (IsFree(port)) return port;
+            if (IsFree(port, host)) return port;
         }
         return 0;
     }

@@ -161,9 +161,12 @@ public sealed class ServerHost : IAsyncDisposable
     /// </summary>
     private async Task ResolvePortAsync(CancellationToken ct)
     {
-        if (PortGuard.IsFree(_options.Port)) return;
+        // Two independent questions: is anyone answering there (reliable), and can we bind
+        // (what Kestrel will actually try).
+        var someoneListens = PortGuard.IsListening(_options.Port, _options.Host);
+        if (!someoneListens && PortGuard.IsFree(_options.Port, _options.Host)) return;
 
-        if (await OliAnswersAsync(_options.Port, ct))
+        if (await PortGuard.OliAnswersAsync(_options.Port, ct))
         {
             _reuseExisting = true;
             PortNotice = $"Сервер OLI уже работает на порту {_options.Port} — использую его.";
@@ -172,7 +175,7 @@ public sealed class ServerHost : IAsyncDisposable
         }
 
         var owner = PortGuard.FindOwner(_options.Port);
-        var alternative = PortGuard.FindFree(_options.Port + 1);
+        var alternative = PortGuard.FindFree(_options.Port + 1, 20, _options.Host);
         if (alternative == 0)
         {
             throw new InvalidOperationException(
@@ -188,23 +191,6 @@ public sealed class ServerHost : IAsyncDisposable
         Report(message);
         OliLog.Warning("SERVER", message);
         _options.Port = alternative;
-    }
-
-    /// <summary>True when an OLI server (not some other app) answers on this port.</summary>
-    private static async Task<bool> OliAnswersAsync(int port, CancellationToken ct)
-    {
-        try
-        {
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
-            using var response = await http.GetAsync($"http://127.0.0.1:{port}/api/health", ct);
-            if (!response.IsSuccessStatusCode) return false;
-            var body = await response.Content.ReadAsStringAsync(ct);
-            return body.Contains("\"service\":\"oli-server\"", StringComparison.OrdinalIgnoreCase);
-        }
-        catch
-        {
-            return false;
-        }
     }
 
     public async Task StopAsync()

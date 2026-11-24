@@ -42,7 +42,14 @@ public partial class App : Application
             // The wizard must never run on top of a server that already answers: that was the
             // source of "address already in use" — the wizard's own server stayed bound and
             // the main window then tried to bind the same port.
-            if (PortGuard.IsFree(settings.Server.Port) &&
+            // A live OLI needs no wizard: its window is about to open and the port is taken
+            // on purpose. A foreign program on the port is no reason to skip the wizard —
+            // the server moves to a free port by itself.
+            // Startup runs before any window exists, so a short synchronous probe here is
+            // safe: the answer is "connection refused" in microseconds, and a busy port
+            // resolves within the 2 s timeout instead of racing the main window.
+            var alreadyServing = PortGuard.OliAnswersAsync(settings.Server.Port).GetAwaiter().GetResult();
+            if (!alreadyServing &&
                 (!settings.SetupCompleted || settings.SetupVersion != AppVersion.Current))
             {
                 var setup = new SetupWindow(settings, StartServerForSetupAsync, OpenFirewallAsync, StartTunnelForSetupAsync);

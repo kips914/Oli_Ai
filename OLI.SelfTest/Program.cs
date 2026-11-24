@@ -532,22 +532,27 @@ try { Directory.Delete(chatRoot, true); } catch { }
 
 Console.WriteLine("PortGuard");
 var busyPort = FreePort();
-var holder = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Any, busyPort);
+// Bind loopback, exactly like the test servers do: a listener on 0.0.0.0 and a bind attempt
+// on 127.0.0.1 can both succeed on Unix, which is how the first version of these checks
+// passed locally and failed in CI.
+var holder = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, busyPort);
 holder.Start();
 try
 {
-    Check("a bound port is reported as busy", () => !PortGuard.IsFree(busyPort));
-    Check("an unbound port is reported as free", () => PortGuard.IsFree(busyPort + 1));
+    Check("a bound port is reported as busy", () => !PortGuard.IsFree(busyPort, "127.0.0.1"));
+    Check("a bound port is reported as listening", () => PortGuard.IsListening(busyPort, "127.0.0.1"));
+    Check("an unbound port is reported as free", () => PortGuard.IsFree(busyPort + 1, "127.0.0.1"));
+    Check("an unbound port has nobody listening", () => !PortGuard.IsListening(busyPort + 1, "127.0.0.1"));
     Check("the next free port is found automatically", () =>
     {
-        var found = PortGuard.FindFree(busyPort + 1);
+        var found = PortGuard.FindFree(busyPort + 1, 20, "127.0.0.1");
         return found > busyPort && PortGuard.IsFree(found);
     });
-    Check("moving never returns a busy port", () => PortGuard.FindFree(busyPort, 3) != busyPort);
+    Check("moving never returns a busy port", () => PortGuard.FindFree(busyPort, 3, "127.0.0.1") != busyPort);
     Check("port 0 and out-of-range values are never 'free'", () => !PortGuard.IsFree(0) && !PortGuard.IsFree(70000));
 }
 finally { holder.Stop(); }
-Check("the busy port becomes usable again after release", () => PortGuard.IsFree(busyPort));
+Check("the busy port becomes usable again after release", () => PortGuard.IsFree(busyPort, "127.0.0.1"));
 
 // ------------------------------------------------------------ setup & components
 // First launch now installs what OLI needs and proves the connection works. These checks
@@ -775,6 +780,9 @@ await using (var firstServer = new OLI.Server.ServerHost(new OLI.Server.ServerOp
     catch { startedWithoutException = false; }
 
     Check("a second server reuses a running OLI instead of crashing", () => startedWithoutException && second.IsRunning);
+    Check("a running OLI is recognised through the health endpoint",
+        () => PortGuard.OliAnswersAsync(busyPort2).GetAwaiter().GetResult());
+
     Check("reusing is explained in one sentence, not a stack trace",
         () => second.PortNotice.Contains("уже работает", StringComparison.OrdinalIgnoreCase));
     Check("stopping the reusing instance does not kill the working server", () =>
@@ -785,7 +793,7 @@ await using (var firstServer = new OLI.Server.ServerHost(new OLI.Server.ServerOp
 }
 
 // A foreign program on the port: the server must move, and say where.
-var foreign = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Any, 0);
+var foreign = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
 foreign.Start();
 var foreignPort = ((System.Net.IPEndPoint)foreign.LocalEndpoint).Port;
 try
@@ -801,6 +809,9 @@ try
     Check("a port held by another program makes OLI move to a free one", () =>
         moved.ActivePort != foreignPort && moved.ActivePort > 0 && moved.IsRunning);
     Check("the move is reported to the user", () => moved.PortNotice.Contains("переехал") || moved.PortNotice.Contains("занят"));
+    // A listener that never answers HTTP must not be taken for a working OLI.
+    Check("a foreign program is not mistaken for a running OLI",
+        () => !PortGuard.OliAnswersAsync(foreignPort).GetAwaiter().GetResult());
 }
 finally { foreign.Stop(); }
 try { Directory.Delete(busyRoot, true); } catch { }
