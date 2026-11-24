@@ -6,10 +6,10 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
-    <Version>1.12.3</Version>
-    <AssemblyVersion>1.12.3.0</AssemblyVersion>
-    <FileVersion>1.12.3.0</FileVersion>
-    <InformationalVersion>1.12.3_released</InformationalVersion>
+    <Version>1.12.4</Version>
+    <AssemblyVersion>1.12.4.0</AssemblyVersion>
+    <FileVersion>1.12.4.0</FileVersion>
+    <InformationalVersion>1.12.4_released</InformationalVersion>
 
     <!-- Real OLI.exe on every build; fully self-contained single file on publish. -->
     <AssemblyName>OLI</AssemblyName>
